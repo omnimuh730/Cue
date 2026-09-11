@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  body { font-family: -apple-system, system-ui, sans-serif; }
+  svg { display: block; max-width: 100%; height: auto; }
+</style>
+<script>
+  // Host page for one Mermaid block. Swift calls cueRender(source, theme, cachedSvg) after load;
+  // results and sizes come back through the cueMermaid message handler.
+  (function () {
+    const post = (payload) => window.webkit?.messageHandlers?.cueMermaid?.postMessage(payload);
+    let observer = null;
+    const report = () => {
+      const svg = document.body.querySelector('svg');
+      if (!svg) return;
+      post({ type: 'size', height: Math.ceil(svg.getBoundingClientRect().height) });
+    };
+    const show = (svg) => {
+      document.body.innerHTML = svg;
+      // Mermaid's DOMPurify pass drops the root id under WebKit, orphaning its scoped stylesheet.
+      const root = document.body.querySelector('svg');
+      if (root) root.id = 'cue';
+      report();
+      if (!observer) {
+        observer = new ResizeObserver(report);
+        observer.observe(document.body);
+      }
+    };
+    let configuredTheme = null;
+    let library = null;
+    // The 3.5 MB library is only parsed when a diagram actually needs rendering; cache hits
+    // (re-opening a chat) just inject the stored SVG.
+    const loadLibrary = () => {
+      if (library) return library;
+      library = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'mermaid.min.js';
+        script.onload = () => resolve(window.mermaid);
+        script.onerror = () => reject(new Error('Mermaid library failed to load.'));
+        document.head.appendChild(script);
+      });
+      return library;
+    };
+    window.cueRender = async function (source, theme, cachedSvg) {
+      try {
+        if (cachedSvg) { show(cachedSvg); return; }
+        const mermaid = await loadLibrary();
+        if (configuredTheme !== theme) {
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'strict',
+            theme: theme,
+            fontFamily: '-apple-system, system-ui, sans-serif',
+            flowchart: { useMaxWidth: true, htmlLabels: true }
+          });
+          configuredTheme = theme;
+        }
+        const { svg } = await mermaid.render('cue', source);
+        show(svg);
+        post({ type: 'svg', svg: svg });
+      } catch (error) {
+        post({ type: 'error', message: String(error?.message ?? error).split('\n')[0] });
+      }
+    };
+    post({ type: 'ready' });
+  })();
+</script>
+</head>
+<body></body>
+</html>

@@ -132,3 +132,51 @@ struct RemoteAndMarkdownTests {
         ])
     }
 }
+
+struct RenderingAndSummaryTests {
+    @Test func markdownRendererReusesUnchangedBlocks() {
+        let first = MarkdownRenderer.render("Intro **bold**\n\n```swift\nlet a = 1\n```\n\nTail", reusing: [])
+        #expect(first.count == 3)
+        let second = MarkdownRenderer.render("Intro **bold**\n\n```swift\nlet a = 1\n```\n\nTail more", reusing: first)
+        #expect(second.count == 3)
+        #expect(second[0] == first[0])
+        #expect(second[1] == first[1])
+        #expect(second[2] != first[2])
+        if case .paragraph(let value) = second[0].kind {
+            #expect(String(value.characters) == "Intro bold")
+        } else {
+            Issue.record("expected paragraph")
+        }
+    }
+
+    @Test func threadSummaryAggregatesTurns() {
+        let usage = TokenUsage(inputTokens: 1000, outputTokens: 200, cachedInputTokens: 600, cacheWriteTokens: 0, reasoningTokens: 50)
+        let turns = [
+            ChatTurn(id: UUID(), role: .user, content: "q1", createdAt: .now, status: .complete, attachments: []),
+            ChatTurn(id: UUID(), role: .assistant, content: "a1", createdAt: .now, status: .complete, attachments: [],
+                     usage: usage, costUsd: 0.01, webSearchCalls: 1,
+                     timing: ResponseTiming(timeToFirstTokenMs: 400, totalMs: 2000), model: .sol, reasoningEffort: .low),
+            ChatTurn(id: UUID(), role: .user, content: "q2", createdAt: .now, status: .complete, attachments: []),
+            ChatTurn(id: UUID(), role: .assistant, content: "a2", createdAt: .now, status: .complete, attachments: [],
+                     usage: usage, costUsd: 0.02, webSearchCalls: 0,
+                     timing: ResponseTiming(timeToFirstTokenMs: 600, totalMs: 3000), model: .mini, reasoningEffort: .none)
+        ]
+        let summary = ThreadSummary.build(from: turns)
+        #expect(summary.userMessages == 2)
+        #expect(summary.assistantMessages == 2)
+        #expect(abs(summary.totalCostUsd - 0.03) < 1e-9)
+        #expect(summary.inputTokens == 2000)
+        #expect(summary.cachedInputTokens == 1200)
+        #expect(summary.cacheHitRatio == 0.6)
+        #expect(summary.reasoningTokens == 100)
+        #expect(summary.webSearchCalls == 1)
+        #expect(summary.models == [.sol, .mini])
+        #expect(summary.averageFirstTokenMs == 500)
+        #expect(summary.averageTotalMs == 2500)
+        #expect(summary.turns.map(\.index) == [1, 2])
+        #expect(ThreadSummary.formatTokens(12_345) == "12.3k")
+        #expect(ThreadSummary.formatTokens(999) == "999")
+        #expect(ThreadSummary.formatMs(1500) == "1.5s")
+        #expect(ThreadSummary.formatMs(420) == "420ms")
+    }
+}

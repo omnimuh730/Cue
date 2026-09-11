@@ -146,18 +146,34 @@ struct SidebarView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(streaming ? "\(conversation.title), responding" : conversation.title)
 
-            Button {
-                session.deleteConversation(conversation)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+            HStack(spacing: 0) {
+                Button {
+                    session.infoConversationID = conversation.identifier
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Thread info: cost, tokens, latency")
+                .accessibilityLabel("Thread info")
+
+                Button {
+                    session.deleteConversation(conversation)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(streaming ? "Stop and delete" : "Delete chat")
             }
-            .buttonStyle(.plain)
-            .opacity(isHovered || isActive ? 0.85 : 0)
-            .padding(.trailing, 4)
-            .help(streaming ? "Stop and delete" : "Delete chat")
+            .opacity(isHovered || isActive ? 0.9 : 0)
+            .padding(.trailing, 2)
         }
         .background(
             RoundedRectangle(cornerRadius: CueTheme.radiusRow, style: .continuous)

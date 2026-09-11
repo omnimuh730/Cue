@@ -10,11 +10,22 @@ private final class ChatRequest {
     let assistantID: UUID
     let token = CancellationToken()
     var task: Task<Void, Never>?
+    /// Deltas received since the last UI flush. Tokens arrive far faster than 25 fps is useful,
+    /// and each model write re-renders the bubble, so they are batched.
+    var pendingText = ""
+    var flushScheduled = false
+    var lastSaveAt = Date.distantPast
 
     init(conversationID: UUID, assistantID: UUID) {
         self.conversationID = conversationID
         self.assistantID = assistantID
     }
+}
+
+/// Batching cadence for streamed text and the floor between SQLite commits while streaming.
+private enum StreamPacing {
+    static let flushInterval: Duration = .milliseconds(40)
+    static let saveInterval: TimeInterval = 1.0
 }
 
 @MainActor
@@ -38,6 +49,8 @@ final class AppSession {
     var settingsOpen = false
     var searchOpen = false
     var previewAttachment: MessageAttachment?
+    /// Conversation whose thread info sheet is open.
+    var infoConversationID: UUID?
     var mermaidAsCode = false
     var remoteNotice: String?
 
@@ -69,8 +82,15 @@ final class AppSession {
         return project(for: conversation)
     }
 
+    /// Full decoded turns; used for export and search, not for rendering (decoding attachments is slow).
     var activeTurns: [ChatTurn] {
-        (activeConversation?.messages ?? []).sorted { $0.createdAt < $1.createdAt }.map { $0.asTurn() }
+        activeMessages.map { $0.asTurn() }
+    }
+
+    /// Ordered model objects for the chat list. Views observe each `Message` directly so a
+    /// streaming delta re-renders one bubble instead of the whole thread.
+    var activeMessages: [Message] {
+        (activeConversation?.messages ?? []).sorted { $0.createdAt < $1.createdAt }
     }
 
     /// True while the on-screen conversation is streaming. Other chats may stream in the background.
@@ -215,6 +235,7 @@ final class AppSession {
         }
         unreadIDs.remove(conversation.identifier)
         parkedDrafts[conversation.identifier] = nil
+        if infoConversationID == conversation.identifier { infoConversationID = nil }
         reloadConversations()
         if activeID == nil {
             if let first = conversations.first {
@@ -416,12 +437,14 @@ final class AppSession {
             )
             return codex.stream(request, signal: token)
         }
-        let continuation = ChatContinuationBuilder.build(from: history)
+        var continuation = ChatContinuationBuilder.build(from: history)
+        continuation.promptCacheKey = "cue-\(conversation.identifier.uuidString.lowercased())"
         return client.stream(apiKey: apiKey, settings: snapshot, continuation: continuation, signal: token)
     }
 
     private func finish(conversationID: UUID, request: ChatRequest) {
         guard requests[conversationID] === request else { return }
+        flush(request, force: true)
         requests[conversationID] = nil
         streamingIDs.remove(conversationID)
         activities[conversationID] = nil
@@ -570,20 +593,58 @@ final class AppSession {
         reloadConversations()
     }
 
-    private func apply(_ event: ChatStreamEvent, request: ChatRequest) {
+    private func target(for request: ChatRequest) -> (Conversation, Message)? {
         guard let conversation = conversations.first(where: { $0.identifier == request.conversationID }),
               let message = conversation.messages.first(where: { $0.identifier == request.assistantID })
-        else { return }
+        else { return nil }
+        return (conversation, message)
+    }
+
+    /// Moves batched deltas into the model. Saves only when the commit floor has passed or the
+    /// caller insists (turn end), so streaming never blocks on disk per token.
+    private func flush(_ request: ChatRequest, force: Bool = false) {
+        request.flushScheduled = false
+        guard let (conversation, message) = target(for: request) else { return }
+        if !request.pendingText.isEmpty {
+            message.content += request.pendingText
+            request.pendingText = ""
+            conversation.updatedAt = .now
+        }
+        if force || Date().timeIntervalSince(request.lastSaveAt) >= StreamPacing.saveInterval {
+            request.lastSaveAt = Date()
+            save()
+        }
+    }
+
+    private func scheduleFlush(_ request: ChatRequest) {
+        guard !request.flushScheduled else { return }
+        request.flushScheduled = true
+        Task { [weak self] in
+            try? await Task.sleep(for: StreamPacing.flushInterval)
+            self?.flush(request)
+        }
+    }
+
+    private func apply(_ event: ChatStreamEvent, request: ChatRequest) {
+        if case .delta(let delta) = event {
+            if request.pendingText.isEmpty, let (conversation, _) = target(for: request) {
+                activities[conversation.identifier] = nil
+            }
+            request.pendingText += delta
+            scheduleFlush(request)
+            return
+        }
+        // Every other event is a state change; land any buffered text first so ordering holds.
+        flush(request, force: false)
+        guard let (conversation, message) = target(for: request) else { return }
         switch event {
-        case .start:
-            break
+        case .start, .delta:
+            return
         case .status(let text):
             if message.content.isEmpty {
                 activities[conversation.identifier] = text
             }
-        case .delta(let delta):
-            message.content += delta
-            activities[conversation.identifier] = nil
+            return
         case .usage(let usage, let costUsd, let model, let effort, let webSearchCalls, _):
             message.usageJSON = try? JSONEncoder().encode(usage)
             message.costUsd = costUsd
@@ -609,6 +670,7 @@ final class AppSession {
             }
         }
         conversation.updatedAt = .now
+        request.lastSaveAt = Date()
         save()
     }
 }

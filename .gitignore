@@ -1,2 +1,6 @@
 Halo/
-AirScript/
+AirScript/GenerateAppIcon.swift
+swiftpm
+Build/
+build/
+DerivedData/

@@ -8,17 +8,18 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 28) {
-                    if session.activeTurns.isEmpty {
+                    let messages = session.activeMessages
+                    if messages.isEmpty {
                         emptyState
                     }
-                    ForEach(session.activeTurns) { turn in
+                    ForEach(messages, id: \.identifier) { message in
                         MessageBubble(
-                            turn: turn,
+                            message: message,
                             mermaidAsCode: session.mermaidAsCode,
-                            activity: turn.status == .streaming ? session.activeActivity : nil,
+                            activity: session.activeActivity,
                             onPreview: { session.previewAttachment = $0 }
                         )
-                        .id(turn.id)
+                        .id(message.identifier)
                     }
                 }
                 .frame(maxWidth: CueTheme.readingColumnMax)
@@ -27,13 +28,13 @@ struct ChatView: View {
                 .padding(.top, CueTheme.Spacing.md)
                 .padding(.bottom, CueTheme.Spacing.lg)
             }
-            .onChange(of: session.activeTurns.last?.content) { _, _ in
-                if let id = session.activeTurns.last?.id {
+            .onChange(of: session.activeMessages.last?.content.count) { _, _ in
+                if let id = session.activeMessages.last?.identifier {
                     proxy.scrollTo(id, anchor: .bottom)
                 }
             }
             .onChange(of: session.activeID) { _, _ in
-                if let id = session.activeTurns.last?.id {
+                if let id = session.activeMessages.last?.identifier {
                     proxy.scrollTo(id, anchor: .bottom)
                 }
             }
@@ -76,19 +77,25 @@ struct ChatView: View {
     }
 }
 
+/// One chat message. Reads the SwiftData `Message` directly so only this bubble re-renders when
+/// its content streams; the parent list is untouched until a message is added or removed.
 struct MessageBubble: View {
-    var turn: ChatTurn
+    var message: Message
     var mermaidAsCode: Bool
     /// Agent progress line shown before the first token arrives (Codex explore status).
     var activity: String? = nil
     var onPreview: (MessageAttachment) -> Void
 
+    private var role: MessageRole { message.role }
+    private var status: MessageStatus? { message.status }
+    private var attachments: [MessageAttachment] { message.attachments }
+
     var body: some View {
         HStack {
-            if turn.role == .user { Spacer(minLength: 40) }
-            VStack(alignment: turn.role == .user ? .trailing : .leading, spacing: 8) {
-                if !turn.attachments.isEmpty {
-                    ForEach(turn.attachments) { attachment in
+            if role == .user { Spacer(minLength: 40) }
+            VStack(alignment: role == .user ? .trailing : .leading, spacing: 8) {
+                if !attachments.isEmpty {
+                    ForEach(attachments) { attachment in
                         if let image = AttachmentImage.nsImage(from: attachment) {
                             Button {
                                 onPreview(attachment)
@@ -104,14 +111,14 @@ struct MessageBubble: View {
                         }
                     }
                 }
-                if turn.role == .user {
-                    Text(turn.content)
+                if role == .user {
+                    Text(message.content)
                         .font(.system(size: 15, weight: .regular))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 } else {
-                    if turn.status == .streaming, turn.content.isEmpty {
+                    if status == .streaming, message.content.isEmpty {
                         HStack(spacing: 8) {
                             ProgressView().controlSize(.small)
                             Text(activity ?? "Thinking…")
@@ -121,31 +128,31 @@ struct MessageBubble: View {
                         }
                         .padding(.vertical, 4)
                         .animation(.easeInOut(duration: 0.18), value: activity)
-                    } else if turn.status == .error {
-                        Label(turn.content, systemImage: "exclamationmark.circle")
+                    } else if status == .error {
+                        Label(message.content, systemImage: "exclamationmark.circle")
                             .font(.system(size: 14))
                             .foregroundStyle(.red)
                             .textSelection(.enabled)
                     } else {
                         MarkdownMessageView(
-                            text: turn.content,
+                            text: message.content,
                             mermaidAsCode: mermaidAsCode,
-                            streaming: turn.status == .streaming
+                            streaming: status == .streaming
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if turn.status == .streaming, !turn.content.isEmpty {
+                    if status == .streaming, !message.content.isEmpty {
                         Text("▍")
                             .foregroundStyle(.secondary)
                     }
-                    if let cost = turn.costUsd, let timing = turn.timing {
+                    if let cost = message.costUsd, let timing = message.timing {
                         Text("\(Pricing.formatUsd(cost)) · \(Pricing.formatLatencyPair(timeToFirstTokenMs: timing.timeToFirstTokenMs, totalMs: timing.totalMs))")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
                 }
             }
-            if turn.role != .user { Spacer(minLength: 24) }
+            if role != .user { Spacer(minLength: 24) }
         }
     }
 }

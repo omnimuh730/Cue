@@ -1,26 +1,80 @@
 import SwiftUI
 
+/// A block with its inline Markdown already parsed, ready to draw without further work.
+nonisolated struct RenderedBlock: Identifiable, Equatable, Sendable {
+    nonisolated enum Kind: Equatable, Sendable {
+        case paragraph(AttributedString)
+        case heading(level: Int, AttributedString)
+        case code(String)
+        case mermaid(String)
+    }
+
+    /// Position in the message; stable while streaming appends, so earlier views are reused.
+    var id: Int
+    var source: MarkdownBlock
+    var kind: Kind
+}
+
+/// Turns Markdown into `RenderedBlock`s. Parsing is the expensive step (`AttributedString(markdown:)`),
+/// so blocks whose source is unchanged from the previous pass are reused verbatim — while streaming
+/// only the trailing block is ever new.
+nonisolated enum MarkdownRenderer {
+    static func render(_ text: String, reusing previous: [RenderedBlock]) -> [RenderedBlock] {
+        var cache: [MarkdownBlock: RenderedBlock.Kind] = [:]
+        for block in previous { cache[block.source] = block.kind }
+        return MarkdownBlocks.split(text).enumerated().map { index, block in
+            if let kind = cache[block] { return RenderedBlock(id: index, source: block, kind: kind) }
+            return RenderedBlock(id: index, source: block, kind: kind(for: block))
+        }
+    }
+
+    static func renderInBackground(_ text: String, reusing previous: [RenderedBlock]) async -> [RenderedBlock] {
+        await Task.detached(priority: .userInitiated) { render(text, reusing: previous) }.value
+    }
+
+    private static func kind(for block: MarkdownBlock) -> RenderedBlock.Kind {
+        switch block {
+        case .paragraph(let value): .paragraph(parse(value))
+        case .heading(let level, let value): .heading(level: level, parse(value))
+        case .code(_, let value): .code(value)
+        case .mermaid(let value): .mermaid(value)
+        }
+    }
+
+    private static func parse(_ markdown: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: markdown,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(markdown)
+    }
+}
+
 struct MarkdownMessageView: View {
     var text: String
     var mermaidAsCode: Bool
     /// While the turn is still streaming, Mermaid fences stay as source (the fence may be incomplete).
     var streaming: Bool = false
+    @State private var blocks: [RenderedBlock] = []
 
     var body: some View {
+        // First appearance parses synchronously so a bubble never flashes empty; from then on
+        // every update (each streaming flush) is parsed off the main thread and reuses
+        // already-parsed blocks, so only the trailing block costs anything.
+        let shown = blocks.isEmpty ? MarkdownRenderer.render(text, reusing: []) : blocks
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(MarkdownBlocks.split(text).enumerated()), id: \.offset) { _, block in
-                switch block {
+            ForEach(shown) { block in
+                switch block.kind {
                 case .paragraph(let value):
-                    Text(parse(value))
+                    Text(value)
                         .font(.system(size: 15.5))
                         .lineSpacing(6)
                         .textSelection(.enabled)
                 case .heading(let level, let value):
-                    Text(parse(value))
+                    Text(value)
                         .font(.system(size: headingSize(level), weight: .semibold))
                         .padding(.top, level <= 2 ? 6 : 2)
                         .textSelection(.enabled)
-                case .code(_, let value):
+                case .code(let value):
                     FencedCodeView(source: value)
                 case .mermaid(let value):
                     if mermaidAsCode || streaming {
@@ -32,6 +86,11 @@ struct MarkdownMessageView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: text) {
+            let previous = blocks.isEmpty ? shown : blocks
+            let next = await MarkdownRenderer.renderInBackground(text, reusing: previous)
+            if !Task.isCancelled, next != blocks { blocks = next }
+        }
     }
 
     private func headingSize(_ level: Int) -> CGFloat {
@@ -41,13 +100,6 @@ struct MarkdownMessageView: View {
         case 3: 17
         default: 15.5
         }
-    }
-
-    private func parse(_ markdown: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: markdown,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(markdown)
     }
 }
 
@@ -67,7 +119,7 @@ struct FencedCodeView: View {
     }
 }
 
-nonisolated enum MarkdownBlock: Equatable, Sendable {
+nonisolated enum MarkdownBlock: Hashable, Sendable {
     case paragraph(String)
     case heading(level: Int, String)
     case code(language: String, String)

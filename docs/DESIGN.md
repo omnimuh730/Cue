@@ -14,7 +14,7 @@ Cue should feel like Tahoe glass sitting on the desktop: strong refraction, comp
 
 Use Liquid Glass for floating surfaces:
 
-- Sidebar, header, composer, settings, search, model popover
+- Sidebar, composer, settings, search, thread info, model popover
 - `glassEffect` / `NSGlassEffectView` with a hairline stroke
 - Window is a transparent `NSPanel`; content provides the material
 - If Reduce Transparency is on, use opaque `windowBackgroundColor`
@@ -24,7 +24,7 @@ Do not fill the chat canvas with a second glass card. Assistant messages sit on 
 ## Layout
 
 - Sidebar: 282pt desktop, overlay below 680pt
-- Header: 44pt
+- No header; a 28pt drag strip tops the reading column
 - Reading / composer column: 800pt max, shared centerline
 - Row radius 8, panels 16, composer 28
 - 4pt spacing rhythm: 4, 8, 12, 16, 20, 24, 32

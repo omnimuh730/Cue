@@ -28,7 +28,11 @@ App Sandbox is **off** so ScreenCaptureKit loopback, Accessibility, and session 
 
 Turns run per conversation: `AppSession` keeps one `ChatRequest` (task + cancellation token) per streaming conversation, so several chats can answer at once. The sidebar shows a live indicator and the agent's progress line for each streaming chat, an unread dot once a background reply lands, and the composer's send button only stops the on-screen conversation. Drafts are parked per conversation when switching.
 
-Assistant Markdown is split into paragraph / heading / code / Mermaid blocks. Mermaid renders in a `WKWebView` once the turn completes (source while streaming). Mermaid's DOMPurify pass drops the root `<svg id>` under WebKit, which orphans its scoped stylesheet; `MermaidBlockView` re-applies the id after injection and sizes the block from the rendered SVG.
+Streaming is paced, not per token: deltas are batched into the model at 25 fps and SwiftData is committed at most once a second while a turn runs (and at turn end). `ChatView` iterates `Message` objects, so a delta re-renders only its bubble. Assistant Markdown is split into paragraph / heading / code / Mermaid blocks by `MarkdownRenderer`, which parses inline Markdown off the main thread and reuses already-parsed blocks, so a streaming update costs one trailing block.
+
+Mermaid renders in a `WKWebView` once the turn completes (source while streaming) from a bundled host page (`Resources/Mermaid`, no network; the 3.5 MB library is only loaded for uncached diagrams). Rendered SVG and measured height are cached per source so reopening a chat is instant and never reflows. Mermaid's DOMPurify pass drops the root `<svg id>` under WebKit, which orphans its scoped stylesheet; the host page re-applies the id after injection.
+
+There is no title bar: the sidebar row's info button opens `ThreadInfoView` (cost, tokens with prompt-cache share, latency, per-reply breakdown). Personal turns send a per-thread `prompt_cache_key` so OpenAI serves the shared prefix from cache.
 
 ## Projects (Code mode)
 

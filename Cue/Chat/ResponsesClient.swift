@@ -170,6 +170,9 @@ struct ResponsesClient {
         if useChain, let previous = continuation.previousResponseID {
             body["previous_response_id"] = previous
         }
+        if let cacheKey = continuation.promptCacheKey, !cacheKey.isEmpty {
+            body["prompt_cache_key"] = cacheKey
+        }
 
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!)
         request.httpMethod = "POST"

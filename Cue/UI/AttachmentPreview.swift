@@ -2,11 +2,22 @@ import AppKit
 import SwiftUI
 
 enum AttachmentImage {
+    /// Base64 → NSImage is expensive and views ask for the same image on every render, so decode once per attachment id.
+    private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 200
+        return cache
+    }()
+
     static func nsImage(from attachment: MessageAttachment) -> NSImage? {
+        let key = attachment.id as NSString
+        if let cached = cache.object(forKey: key) { return cached }
         guard let payload = attachment.dataURL.split(separator: ",").last,
-              let data = Data(base64Encoded: String(payload))
+              let data = Data(base64Encoded: String(payload)),
+              let image = NSImage(data: data)
         else { return nil }
-        return NSImage(data: data)
+        cache.setObject(image, forKey: key)
+        return image
     }
 }
 

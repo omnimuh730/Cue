@@ -103,6 +103,8 @@ nonisolated struct ChatContinuation: Equatable, Sendable {
     var messages: [ChatRequestMessage]
     var previousResponseID: String?
     var inputMessages: [ChatRequestMessage]?
+    /// Stable per-thread key so OpenAI routes every turn to the same prompt-cache shard.
+    var promptCacheKey: String? = nil
 }
 
 nonisolated enum ChatError: LocalizedError {

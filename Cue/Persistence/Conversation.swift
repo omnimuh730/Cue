@@ -101,6 +101,18 @@ final class Message {
         statusRaw.flatMap(MessageStatus.init(rawValue:))
     }
 
+    var attachments: [MessageAttachment] {
+        decode(attachmentsJSON, as: [MessageAttachment].self, decoder: JSONDecoder()) ?? []
+    }
+
+    var timing: ResponseTiming? {
+        decode(timingJSON, as: ResponseTiming.self, decoder: JSONDecoder())
+    }
+
+    var usage: TokenUsage? {
+        decode(usageJSON, as: TokenUsage.self, decoder: JSONDecoder())
+    }
+
     func asTurn() -> ChatTurn {
         let decoder = JSONDecoder()
         return ChatTurn(

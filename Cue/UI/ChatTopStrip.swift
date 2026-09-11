@@ -1,10 +1,13 @@
 import SwiftUI
 
-struct HeaderView: View {
+/// Replaces the old title bar: a thin drag handle across the top of the reading column and,
+/// only while the sidebar is hidden, a button to bring it back. Thread details live in the
+/// sidebar row's info button instead.
+struct ChatTopStrip: View {
     @Bindable var session: AppSession
 
     var body: some View {
-        HStack(spacing: CueTheme.Spacing.sm) {
+        HStack(spacing: 0) {
             if !session.sidebarOpen {
                 Button {
                     session.sidebarOpen = true
@@ -16,58 +19,13 @@ struct HeaderView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Show sidebar")
+                .padding(.leading, CueTheme.trafficClearance)
             }
-
-            Text(session.activeConversation?.title ?? "Cue")
-                .font(.system(size: 15, weight: .semibold))
-                .lineLimit(1)
-                .allowsHitTesting(false)
-
-            if session.isStreaming {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.mini)
-                    Text(session.activeActivity ?? "Responding…")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                .transition(.opacity)
-                .allowsHitTesting(false)
-            }
-
-            Spacer(minLength: 8)
-
-            if let project = session.activeProject {
-                Button {
-                    session.openProjectFolder()
-                } label: {
-                    Label(project.name, systemImage: "folder")
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .cueGlass(cornerRadius: 13, interactive: true)
-                .help(project.folderPath)
-            }
-
-            if let summary = session.activeConversation, summary.totalCostUsd > 0 {
-                Text(Pricing.formatUsd(summary.totalCostUsd))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .allowsHitTesting(false)
-            }
+            Spacer(minLength: 0)
         }
-        .padding(.leading, session.sidebarOpen ? CueTheme.Spacing.md : CueTheme.trafficClearance)
-        .padding(.trailing, CueTheme.Spacing.md)
-        .frame(height: CueTheme.headerHeight)
+        .frame(height: 28)
         .frame(maxWidth: .infinity)
-        .animation(.easeInOut(duration: 0.18), value: session.isStreaming)
-        .cueGlass(cornerRadius: 0)
+        .contentShape(Rectangle())
         .cueWindowDrag()
     }
 }

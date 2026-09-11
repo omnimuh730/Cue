@@ -16,12 +16,12 @@ struct RootView: View {
                         .padding(.trailing, 4)
                 }
                 VStack(spacing: 0) {
-                    HeaderView(session: session)
                     ChatView(session: session)
                     ComposerView(session: session)
                         .padding(.horizontal, CueTheme.composerInset)
                         .padding(.bottom, CueTheme.composerInset)
                 }
+                .overlay(alignment: .top) { ChatTopStrip(session: session) }
             }
             if session.settingsOpen {
                 SettingsView(session: session)
@@ -32,6 +32,12 @@ struct RootView: View {
             if let preview = session.previewAttachment {
                 AttachmentPreviewOverlay(attachment: preview) {
                     session.previewAttachment = nil
+                }
+            }
+            if let infoID = session.infoConversationID,
+               let conversation = session.conversations.first(where: { $0.identifier == infoID }) {
+                ThreadInfoView(conversation: conversation, project: session.project(for: conversation)) {
+                    session.infoConversationID = nil
                 }
             }
             if let project = session.indexPrompt {
@@ -66,6 +72,10 @@ struct RootView: View {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 if event.keyCode == 53, session.previewAttachment != nil {
                     session.previewAttachment = nil
+                    return nil
+                }
+                if event.keyCode == 53, session.infoConversationID != nil {
+                    session.infoConversationID = nil
                     return nil
                 }
                 if event.keyCode == 53, session.indexPrompt != nil {
