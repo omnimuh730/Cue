@@ -1,9 +1,20 @@
 import AppKit
 import SwiftUI
 
+/// Nonactivating panel that can be locked out of key status while remote control replays
+/// synthetic clicks into it, so the interview app never loses keyboard focus.
+@MainActor
+final class CuePanel: NSPanel {
+    var allowsKeyStatus = true
+
+    override var canBecomeKey: Bool {
+        allowsKeyStatus && super.canBecomeKey
+    }
+}
+
 @MainActor
 final class CuePanelController: NSObject, NSWindowDelegate {
-    let panel: NSPanel
+    let panel: CuePanel
     private let hostingView: NSHostingView<RootView>
     var isQuitting = false
     var onClose: (() -> Void)?
@@ -11,7 +22,7 @@ final class CuePanelController: NSObject, NSWindowDelegate {
     init(rootView: RootView) {
         let hosting = NSHostingView(rootView: rootView)
         hostingView = hosting
-        let panel = NSPanel(
+        let panel = CuePanel(
             contentRect: NSRect(x: 0, y: 0, width: 1240, height: 820),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
@@ -39,16 +50,28 @@ final class CuePanelController: NSObject, NSWindowDelegate {
     }
 
     func apply(settings: PublicSettings, remoteActive: Bool) {
-        panel.sharingType = settings.stealthMode ? .none : .none
-        if settings.stealthMode {
-            panel.sharingType = .none
-        } else {
-            panel.sharingType = .readOnly
-        }
+        panel.sharingType = settings.stealthMode ? .none : .readOnly
         if !remoteActive {
             panel.level = settings.alwaysOnTop ? .floating : .normal
         }
         panel.alphaValue = CGFloat(settings.windowOpacity)
+    }
+
+    /// Size of the SwiftUI root in points; the virtual cursor lives in this space (origin top-left).
+    var contentSize: CGSize {
+        panel.contentView?.bounds.size ?? panel.frame.size
+    }
+
+    /// Delivers a synthetic AppKit event to the view under `point` (top-left origin, content coordinates).
+    func replay(_ event: NSEvent) {
+        panel.sendEvent(event)
+    }
+
+    func replayScroll(_ event: NSEvent, at point: CGPoint) {
+        guard let content = panel.contentView else { return }
+        let flipped = NSPoint(x: point.x, y: contentSize.height - point.y)
+        let target = content.hitTest(content.convert(flipped, from: nil)) ?? content
+        target.scrollWheel(with: event)
     }
 
     func reveal(passive: Bool) {

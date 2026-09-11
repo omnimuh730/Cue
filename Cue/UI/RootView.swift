@@ -23,14 +23,33 @@ struct RootView: View {
                         .padding(.bottom, CueTheme.composerInset)
                 }
             }
-            if session.remote.cursor.active {
-                VirtualCursorOverlay(state: session.remote.cursor)
-            }
             if session.settingsOpen {
                 SettingsView(session: session)
             }
             if session.searchOpen {
                 SearchView(session: session)
+            }
+            if let preview = session.previewAttachment {
+                AttachmentPreviewOverlay(attachment: preview) {
+                    session.previewAttachment = nil
+                }
+            }
+            if let project = session.indexPrompt {
+                IndexProjectDialog(
+                    project: project,
+                    indexing: session.indexing,
+                    error: session.indexError,
+                    onIndex: { session.confirmProjectIndex() },
+                    onSkip: { session.skipProjectIndex() }
+                )
+            }
+        }
+        .overlay {
+            // Cursor coordinates are panel content space; the overlay must span the full window,
+            // including the transparent title bar the ZStack above is inset from.
+            if session.remote.cursor.active {
+                VirtualCursorOverlay(state: session.remote.cursor)
+                    .ignoresSafeArea()
             }
         }
         .overlay(alignment: .top) {
@@ -45,6 +64,14 @@ struct RootView: View {
         }
         .onAppear {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                if event.keyCode == 53, session.previewAttachment != nil {
+                    session.previewAttachment = nil
+                    return nil
+                }
+                if event.keyCode == 53, session.indexPrompt != nil {
+                    session.skipProjectIndex()
+                    return nil
+                }
                 if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "n" {
                     session.newChat()
                     return nil

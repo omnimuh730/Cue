@@ -13,7 +13,7 @@ enum CueTheme {
     static let radiusComposer: CGFloat = 28
     static let composerInset: CGFloat = 18
     static let composerFontSize: CGFloat = 15.5
-    static let composerLineHeight: CGFloat = 23
+    static let composerLineHeight: CGFloat = 20
     static let composerMinLines = 1
     static let composerMaxLines = 10
 

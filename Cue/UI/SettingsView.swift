@@ -3,6 +3,7 @@ import SwiftUI
 
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case provider
+    case projects
     case listen
     case hotkeys
     case data
@@ -12,6 +13,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .provider: "AI provider"
+        case .projects: "Projects"
         case .listen: "Interview listen"
         case .hotkeys: "Hotkeys"
         case .data: "Data controls"
@@ -21,6 +23,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .provider: "key.fill"
+        case .projects: "folder"
         case .listen: "waveform"
         case .hotkeys: "keyboard"
         case .data: "lock.shield"
@@ -38,6 +41,7 @@ struct SettingsView: View {
     @State private var replacingKey = false
     @State private var recording: HotkeyAction?
     @State private var recorder = HotkeyRecordingController()
+    @State private var resolvedCodex: CodexBinary?
 
     var body: some View {
         ZStack {
@@ -64,6 +68,7 @@ struct SettingsView: View {
         }
         .onAppear {
             draft = session.settings
+            resolvedCodex = CodexBinaryLocator.resolve(override: draft.codexPath)
             apiKey = ""
             clearKey = false
             replacingKey = false
@@ -128,6 +133,7 @@ struct SettingsView: View {
     private var content: some View {
         switch section {
         case .provider: provider
+        case .projects: projectsSection
         case .listen: listen
         case .hotkeys: hotkeys
         case .data: data
@@ -193,6 +199,105 @@ struct SettingsView: View {
                     .scrollContentBackground(.hidden)
             }
         }
+    }
+
+    private var projectsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            CueGlassField(
+                title: "Codex CLI",
+                help: "Project chats run the OpenAI Codex CLI in read-only mode inside the folder you open. Leave blank to auto-detect (PATH, Homebrew, npm, or Halo.app)."
+            ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        TextField("Auto-detect", text: Binding(
+                            get: { draft.codexPath ?? "" },
+                            set: { draft.codexPath = $0.isEmpty ? nil : $0 }
+                        ))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, design: .monospaced))
+                        .onSubmit { resolvedCodex = CodexBinaryLocator.resolve(override: draft.codexPath) }
+                        Button("Choose…") { chooseCodexBinary() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                        Button("Check") { resolvedCodex = CodexBinaryLocator.resolve(override: draft.codexPath) }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    if let resolvedCodex {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Found via \(resolvedCodex.source)")
+                                    .font(.system(size: 12, weight: .medium))
+                                Text(resolvedCodex.executable)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .help(resolvedCodex.executable)
+                            }
+                        }
+                    } else {
+                        Label("No Codex CLI found. Install with `npm i -g @openai/codex` or choose the binary.", systemImage: "exclamationmark.triangle")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            CueGlassField(title: "Project folders", help: "Load a project on a chat to run that thread through Codex in the folder. New chats stay as regular conversations until you load a project on them.") {
+                VStack(alignment: .leading, spacing: 8) {
+                    if session.projects.isEmpty {
+                        Text("No projects yet. Use “Load project” in the sidebar to open a folder.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(session.projects, id: \.identifier) { project in
+                        HStack(spacing: 10) {
+                            WorkspaceAvatar(letter: ProjectPaths.avatarLetter(project.name), isProject: true)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(project.name)
+                                    .font(.system(size: 13, weight: .medium))
+                                Text(project.folderPath)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer()
+                            Text(project.catalog == nil ? "Not indexed" : "Indexed")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                            Button("Re-index") {
+                                session.indexPrompt = project
+                                session.settingsOpen = false
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                            Button("Remove") { session.removeProject(project) }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.red)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+    }
+
+    private func chooseCodexBinary() {
+        let dialog = NSOpenPanel()
+        dialog.title = "Choose the codex executable"
+        dialog.canChooseFiles = true
+        dialog.canChooseDirectories = false
+        dialog.allowsMultipleSelection = false
+        dialog.showsHiddenFiles = true
+        NSApp.activate(ignoringOtherApps: true)
+        guard dialog.runModal() == .OK, let url = dialog.url else { return }
+        draft.codexPath = url.path
+        resolvedCodex = CodexBinaryLocator.resolve(override: url.path)
     }
 
     private var listen: some View {

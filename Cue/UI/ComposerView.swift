@@ -11,24 +11,25 @@ struct ComposerView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(session.attachments) { attachment in
-                            if let data = Data(base64Encoded: attachment.dataURL.components(separatedBy: ",").last ?? ""),
-                               let image = NSImage(data: data) {
-                                Image(nsImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 56, height: 56)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            }
+                            ComposerAttachmentChip(
+                                attachment: attachment,
+                                onPreview: { session.previewAttachment = attachment },
+                                onRemove: {
+                                    session.attachments.removeAll { $0.id == attachment.id }
+                                    if session.previewAttachment?.id == attachment.id {
+                                        session.previewAttachment = nil
+                                    }
+                                }
+                            )
                         }
                     }
                 }
             }
             ZStack(alignment: .topLeading) {
                 if session.draft.isEmpty {
-                    Text("Ask anything")
+                    Text(placeholder)
                         .font(.system(size: CueTheme.composerFontSize))
                         .foregroundStyle(.tertiary)
-                        .padding(.top, 2)
                         .allowsHitTesting(false)
                 }
                 GrowingComposerField(
@@ -41,6 +42,9 @@ struct ComposerView: View {
             HStack(spacing: CueTheme.Spacing.xs) {
                 listenButton
                 listenPill
+                if backgroundStreams > 0 {
+                    backgroundPill
+                }
                 Spacer()
                 ModelPicker(session: session)
                 Button {
@@ -51,9 +55,10 @@ struct ComposerView: View {
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.plain)
-                .background(Color.accentColor, in: Circle())
+                .background(session.isStreaming ? Color.red.opacity(0.85) : Color.accentColor, in: Circle())
                 .foregroundStyle(.white)
-                .help(session.isStreaming ? "Stop" : "Send")
+                .help(session.isStreaming ? "Stop this response" : "Send")
+                .animation(.easeInOut(duration: 0.15), value: session.isStreaming)
             }
         }
         .padding(.horizontal, 16)
@@ -63,6 +68,31 @@ struct ComposerView: View {
         .shadow(color: .black.opacity(0.18), radius: 24, y: 8)
         .frame(maxWidth: CueTheme.readingColumnMax)
         .frame(maxWidth: .infinity)
+    }
+
+    private var placeholder: String {
+        if let project = session.activeProject { return "Ask about \(project.name)" }
+        return "Ask anything"
+    }
+
+    /// Chats other than the one on screen that are still receiving a reply.
+    private var backgroundStreams: Int {
+        session.streamingIDs.subtracting([session.activeID].compactMap { $0 }).count
+    }
+
+    private var backgroundPill: some View {
+        HStack(spacing: 5) {
+            StreamingIndicator()
+                .frame(width: 18)
+            Text(backgroundStreams == 1 ? "1 chat responding" : "\(backgroundStreams) chats responding")
+                .font(.caption)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.accentColor.opacity(0.14), in: Capsule())
+        .foregroundStyle(Color.accentColor)
+        .transition(.opacity)
+        .help("Replies keep streaming in the background; pick the chat in the sidebar to read it")
     }
 
     private var listenButton: some View {

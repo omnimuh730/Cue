@@ -12,6 +12,10 @@ final class Conversation {
     var totalOutputTokens: Int
     var totalReasoningTokens: Int
     var totalWebSearchCalls: Int
+    /// Linked project workspace; nil for Personal (Responses API) chats.
+    var projectID: UUID?
+    /// Codex thread id so project follow-ups resume the same agent thread.
+    var codexThreadID: String?
     @Relationship(deleteRule: .cascade, inverse: \Message.conversation)
     var messages: [Message]
 
@@ -19,18 +23,41 @@ final class Conversation {
         identifier: UUID = UUID(),
         title: String = "New chat",
         createdAt: Date = .now,
-        updatedAt: Date = .now
+        updatedAt: Date = .now,
+        projectID: UUID? = nil
     ) {
         self.identifier = identifier
         self.title = title
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.projectID = projectID
         self.totalCostUsd = 0
         self.totalInputTokens = 0
         self.totalOutputTokens = 0
         self.totalReasoningTokens = 0
         self.totalWebSearchCalls = 0
         self.messages = []
+    }
+}
+
+/// A local folder Cue can answer questions about through the Codex CLI.
+@Model
+final class Project {
+    @Attribute(.unique) var identifier: UUID
+    var name: String
+    var folderPath: String
+    var createdAt: Date
+    var updatedAt: Date
+    /// Map catalog of folders and key files, built when the user chooses to index.
+    var catalog: String?
+    var catalogAt: Date?
+
+    init(identifier: UUID = UUID(), name: String, folderPath: String) {
+        self.identifier = identifier
+        self.name = name
+        self.folderPath = folderPath
+        self.createdAt = .now
+        self.updatedAt = .now
     }
 }
 

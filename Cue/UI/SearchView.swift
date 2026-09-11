@@ -34,7 +34,7 @@ struct SearchView: View {
                     LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(filtered, id: \.identifier) { conversation in
                             Button {
-                                session.activeID = conversation.identifier
+                                session.select(conversation.identifier)
                                 session.searchOpen = false
                             } label: {
                                 Text(conversation.title)

@@ -23,7 +23,37 @@ struct HeaderView: View {
                 .lineLimit(1)
                 .allowsHitTesting(false)
 
+            if session.isStreaming {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text(session.activeActivity ?? "Responding…")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .transition(.opacity)
+                .allowsHitTesting(false)
+            }
+
             Spacer(minLength: 8)
+
+            if let project = session.activeProject {
+                Button {
+                    session.openProjectFolder()
+                } label: {
+                    Label(project.name, systemImage: "folder")
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .cueGlass(cornerRadius: 13, interactive: true)
+                .help(project.folderPath)
+            }
 
             if let summary = session.activeConversation, summary.totalCostUsd > 0 {
                 Text(Pricing.formatUsd(summary.totalCostUsd))
@@ -36,6 +66,7 @@ struct HeaderView: View {
         .padding(.trailing, CueTheme.Spacing.md)
         .frame(height: CueTheme.headerHeight)
         .frame(maxWidth: .infinity)
+        .animation(.easeInOut(duration: 0.18), value: session.isStreaming)
         .cueGlass(cornerRadius: 0)
         .cueWindowDrag()
     }

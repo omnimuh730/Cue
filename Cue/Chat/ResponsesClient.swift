@@ -1,10 +1,12 @@
 import Foundation
 
-enum ChatStreamEvent: Sendable {
+nonisolated enum ChatStreamEvent: Sendable {
     case start
+    /// Progress text while an agent backend explores (Codex); cleared by the first delta.
+    case status(String)
     case delta(String)
     case usage(TokenUsage, costUsd: Double, model: ModelID, effort: ReasoningEffort, webSearchCalls: Int, breakdown: CostBreakdown)
-    case done(timing: ResponseTiming, responseID: String?)
+    case done(timing: ResponseTiming, responseID: String?, codexThreadID: String?)
     case error(String)
 }
 
@@ -84,7 +86,8 @@ struct ResponsesClient {
                 timeToFirstTokenMs: max(0, ((state.firstTokenAt ?? finishedAt).timeIntervalSince(startedAt)) * 1000),
                 totalMs: max(0, finishedAt.timeIntervalSince(startedAt) * 1000)
             ),
-            responseID: state.responseID
+            responseID: state.responseID,
+            codexThreadID: nil
         ))
     }
 

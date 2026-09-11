@@ -30,7 +30,7 @@ struct GrowingComposerField: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
-        textView.textContainerInset = NSSize(width: 0, height: 1)
+        textView.textContainerInset = .zero
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: 100, height: CGFloat.greatestFiniteMagnitude)
@@ -55,10 +55,19 @@ struct GrowingComposerField: NSViewRepresentable {
         context.coordinator.onSubmit = onSubmit
         guard let textView = scroll.documentView as? NSTextView else { return }
         if textView.string != text {
+            let editing = textView.window?.firstResponder == textView
+            let selected = textView.selectedRanges
+            let limit = (text as NSString).length
             textView.string = text
             textView.typingAttributes = Coordinator.typingAttributes
-            if textView.window?.firstResponder == textView {
-                textView.moveToEndOfDocument(nil)
+            if editing {
+                let valid = selected.compactMap { value -> NSValue? in
+                    guard let range = value as? NSRange, NSMaxRange(range) <= limit else { return nil }
+                    return NSValue(range: range)
+                }
+                if !valid.isEmpty {
+                    textView.selectedRanges = valid
+                }
             }
         }
         context.coordinator.recalculateHeight(of: textView)
@@ -67,7 +76,7 @@ struct GrowingComposerField: NSViewRepresentable {
 
 final class ComposerTextView: NSTextView {
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: CueTheme.composerMinHeight)
+        NSSize(width: NSView.noIntrinsicMetric, height: CueTheme.composerLineHeight)
     }
 
     override func paste(_ sender: Any?) {
@@ -85,13 +94,9 @@ extension GrowingComposerField {
         static let composerFont = NSFont.systemFont(ofSize: CueTheme.composerFontSize)
 
         static var typingAttributes: [NSAttributedString.Key: Any] {
-            let style = NSMutableParagraphStyle()
-            style.lineHeightMultiple = 1.5
-            style.lineBreakMode = .byWordWrapping
-            return [
+            [
                 .font: composerFont,
-                .foregroundColor: NSColor.labelColor,
-                .paragraphStyle: style
+                .foregroundColor: NSColor.labelColor
             ]
         }
 
@@ -125,8 +130,22 @@ extension GrowingComposerField {
             let width = textView.bounds.width > 1 ? textView.bounds.width : (scrollView?.contentSize.width ?? 300)
             container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
             layoutManager.ensureLayout(for: container)
-            let used = layoutManager.usedRect(for: container).height + textView.textContainerInset.height * 2
-            let next = min(max(ceil(used), CueTheme.composerMinHeight), CueTheme.composerMaxHeight)
+            let glyphLength = layoutManager.glyphRange(for: container).length
+            let used = glyphLength == 0
+                ? CueTheme.composerLineHeight
+                : max(layoutManager.usedRect(for: container).height, CueTheme.composerLineHeight)
+            let next = min(
+                max(ceil(used + textView.textContainerInset.height * 2), CueTheme.composerMinHeight),
+                CueTheme.composerMaxHeight
+            )
+            textView.minSize = NSSize(width: 0, height: next)
+            textView.maxSize = NSSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: next >= CueTheme.composerMaxHeight - 0.5 ? CueTheme.composerMaxHeight : next
+            )
+            if abs(textView.frame.height - next) > 0.5 {
+                textView.frame.size.height = next
+            }
             scrollView?.hasVerticalScroller = next >= CueTheme.composerMaxHeight - 0.5
             guard abs(height.wrappedValue - next) > 0.5 else { return }
             DispatchQueue.main.async { [height] in

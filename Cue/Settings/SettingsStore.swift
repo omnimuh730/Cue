@@ -55,6 +55,8 @@ struct PublicSettings: Codable, Equatable, Sendable {
     var passiveFocusMode: Bool
     var systemInstruction: String
     var hotkeys: [String: String]
+    /// Optional path to a `codex` CLI for project chats. Nil means auto-detect.
+    var codexPath: String?
 
     static let `default` = PublicSettings(
         model: .sol,
@@ -68,7 +70,8 @@ struct PublicSettings: Codable, Equatable, Sendable {
         windowOpacity: 1,
         passiveFocusMode: true,
         systemInstruction: "",
-        hotkeys: Dictionary(uniqueKeysWithValues: HotkeyCatalog.defaults.map { ($0.key.rawValue, $0.value) })
+        hotkeys: Dictionary(uniqueKeysWithValues: HotkeyCatalog.defaults.map { ($0.key.rawValue, $0.value) }),
+        codexPath: nil
     )
 
     var hotkeyMap: HotkeyMap {
@@ -114,6 +117,9 @@ final class SettingsStore {
         next.systemInstruction = SystemInstruction.normalize(next.systemInstruction)
         next.windowOpacity = min(1, max(0.15, next.windowOpacity))
         next.setHotkeys(next.hotkeyMap)
+        if let path = next.codexPath?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            next.codexPath = path.isEmpty ? nil : path
+        }
         if clearAPIKey {
             APIKeyStore.delete()
         } else if let apiKey {
