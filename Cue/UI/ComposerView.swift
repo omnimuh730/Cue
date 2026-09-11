@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ComposerView: View {
     @Bindable var session: AppSession
-    @State private var fieldHeight = CueTheme.composerMinHeight
 
     var body: some View {
         VStack(alignment: .leading, spacing: CueTheme.Spacing.xs) {
@@ -34,10 +33,9 @@ struct ComposerView: View {
                 }
                 GrowingComposerField(
                     text: $session.draft,
-                    height: $fieldHeight,
                     onSubmit: { session.send() }
                 )
-                .frame(height: fieldHeight)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             HStack(spacing: CueTheme.Spacing.xs) {
                 listenButton
@@ -108,12 +106,44 @@ struct ComposerView: View {
     }
 
     private var listenPill: some View {
-        Text(session.listen.status.phase.rawValue)
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(phaseColor.opacity(0.18), in: Capsule())
-            .foregroundStyle(phaseColor)
+        let status = session.listen.status
+        return HStack(spacing: 5) {
+            Text(pillLabel(status))
+                .font(.caption)
+                .lineLimit(1)
+            if status.phase == .listening || status.phase == .armed {
+                Capsule()
+                    .fill(phaseColor)
+                    .frame(width: max(2, 22 * CGFloat(min(1, status.inputLevel * 4))), height: 4)
+                    .frame(width: 22, alignment: .leading)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(phaseColor.opacity(0.18), in: Capsule())
+        .foregroundStyle(phaseColor)
+        .help(status.error ?? pillHelp(status))
+    }
+
+    private func pillLabel(_ status: ListenStatus) -> String {
+        switch status.phase {
+        case .error: status.error.map { "error · \($0)" }?.prefix(72).description ?? "error"
+        case .downloading:
+            status.downloadProgress.map { "loading \(Int($0 * 100))%" } ?? "loading model"
+        default: status.phase.rawValue
+        }
+    }
+
+    private func pillHelp(_ status: ListenStatus) -> String {
+        switch status.phase {
+        case .off: "Listen is off. Click the waveform to arm speaker listen."
+        case .armed: "Armed. Speech from the speakers is detected automatically. The bar shows input level."
+        case .listening: "Hearing speech…"
+        case .transcribing: "Transcribing the last phrase."
+        case .downloading: "Loading the Whisper model. First use downloads and compiles it; this can take a minute."
+        case .error: "Listen error."
+        }
     }
 
     private var phaseColor: Color {

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import Cue
@@ -130,6 +131,40 @@ struct RemoteAndMarkdownTests {
             .code(language: "", "[0, 1, 1, 2]"),
             .paragraph("After")
         ])
+    }
+
+    @Test func mermaidZoomPanClampsAndUnlocksDragAfterOverflow() {
+        var zoom = MermaidZoomPan()
+        let size = CGSize(width: 200, height: 100)
+        zoom.pan(by: CGSize(width: 40, height: 10), in: size)
+        #expect(zoom.scale == 1)
+        #expect(zoom.offset == .zero)
+        #expect(!zoom.canPan)
+
+        zoom.zoom(by: 2, toward: CGPoint(x: 100, y: 50), in: size)
+        #expect(zoom.scale == 2)
+        #expect(zoom.offset == .zero)
+        #expect(zoom.canPan)
+
+        zoom.pan(by: CGSize(width: 1000, height: 1000), in: size)
+        #expect(zoom.offset.width == 100)
+        #expect(zoom.offset.height == 50)
+
+        zoom.reset()
+        #expect(zoom.scale == 1)
+        #expect(zoom.offset == .zero)
+    }
+
+    @Test func mermaidZoomKeepsPointUnderCursor() {
+        var zoom = MermaidZoomPan()
+        let size = CGSize(width: 200, height: 100)
+        zoom.zoom(by: 2, toward: CGPoint(x: 0, y: 50), in: size)
+        #expect(zoom.scale == 2)
+        #expect(zoom.offset.width == 100)
+        #expect(abs(zoom.offset.height) < 0.001)
+
+        zoom.zoom(by: 10, toward: CGPoint(x: 100, y: 50), in: size)
+        #expect(zoom.scale == MermaidZoomPan.maxScale)
     }
 }
 

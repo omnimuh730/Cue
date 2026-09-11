@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Keys Xcode's INFOPLIST_KEY_* mapping does not cover; merged with the generated Info.plist. -->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Cue captures system speaker audio to transcribe interview questions on-device.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Cue needs Screen Recording to capture system speaker audio and desktop screenshots.</string>
+</dict>
+</plist>

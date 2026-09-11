@@ -111,6 +111,18 @@ struct CueTests {
         #expect(jump.virtualX == 10)
     }
 
+    @Test func composerViewportHugsTextHeightUntilTen() {
+        let line = CueTheme.composerLineHeight
+        #expect(ComposerFieldMetrics.viewportHeight(forUsedHeight: 0) == CueTheme.composerMinHeight)
+        #expect(ComposerFieldMetrics.viewportHeight(forUsedHeight: line) == line)
+        #expect(ComposerFieldMetrics.viewportHeight(forUsedHeight: line * 3) == line * 3)
+        #expect(ComposerFieldMetrics.viewportHeight(forUsedHeight: line * 2.4) == ceil(line * 2.4))
+        #expect(ComposerFieldMetrics.viewportHeight(forUsedHeight: line * 10) == CueTheme.composerMaxHeight)
+        #expect(ComposerFieldMetrics.viewportHeight(forUsedHeight: line * 15) == CueTheme.composerMaxHeight)
+        #expect(ComposerFieldMetrics.showsScroller(forUsedHeight: line * 10) == false)
+        #expect(ComposerFieldMetrics.showsScroller(forUsedHeight: line * 11))
+    }
+
     @Test func windowBoundsRespectWorkArea() {
         let next = WindowBounds.clampMovedBounds(
             RectValue(x: 10, y: 10, width: 100, height: 100),
