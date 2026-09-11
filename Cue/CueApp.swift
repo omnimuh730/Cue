@@ -1,32 +1,28 @@
-//
-//  CueApp.swift
-//  Cue
-//
-//  Created by robin on 9/10/26.
-//
-
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 @main
 struct CueApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        MenuBarExtra("Cue", systemImage: "circle.dashed.inset.filled") {
+            Button("Show / Hide Cue") {
+                NotificationCenter.default.post(name: .cueToggleWindow, object: nil)
+            }
+            Button("Settings…") {
+                NotificationCenter.default.post(name: .cueOpenSettings, object: nil)
+            }
+            Divider()
+            Button("Quit Cue") {
+                NotificationCenter.default.post(name: .cueQuit, object: nil)
+            }
         }
-        .modelContainer(sharedModelContainer)
     }
+}
+
+extension Notification.Name {
+    static let cueToggleWindow = Notification.Name("cue.toggleWindow")
+    static let cueOpenSettings = Notification.Name("cue.openSettings")
+    static let cueQuit = Notification.Name("cue.quit")
 }

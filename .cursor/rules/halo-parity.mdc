@@ -1,0 +1,19 @@
+---
+description: Halo feature contract Cue must keep
+alwaysApply: true
+---
+
+# Halo parity
+
+Cue is a menu-bar accessory. Closing the panel hides it; Quit is explicit.
+
+Required behavior:
+
+- Passive focus: show without stealing key focus (`orderFrontRegardless`).
+- Stealth, opacity, always-on-top, move/resize nudges, customizable global hotkeys.
+- Chat: GPT-5.6 Sol/Terra/Luna + 5.4 mini, reasoning effort, `store: true` + `previous_response_id` with full-thread fallback, web search, vision attachments, cost estimates.
+- Listen modes: Whisper (SCK + WhisperKit), Apple Speech, Accessibility (Live Captions AX).
+- Passive remote control: virtual cursor, click shield, keyboard tap; Escape exits; never block Force Quit.
+- Screenshots (desktop + region) attach to the composer.
+
+Port Halo catalogs (`models`, `pricing`, `hotkeys`) as Swift sources of truth. Do not fork IDs in views.

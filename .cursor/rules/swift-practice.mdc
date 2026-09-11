@@ -1,0 +1,23 @@
+---
+description: Swift 6 coding practice for Cue
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# Swift practice
+
+- Swift 6, structured concurrency, `MainActor` for UI and session state.
+- Mark CPU / AX / audio work `nonisolated` and hop to MainActor only on real UI deltas.
+- No force-unwraps or `try!` in product paths. Use `guard`, `throws`, or typed results.
+- Protocols at real boundaries (`SpeechTranscribing`, listen sources). Do not protocol-wrap every struct.
+- SwiftData for conversations; Keychain for the API key; UserDefaults for lightweight prefs.
+- Windows are AppKit (`NSPanel`). SwiftUI is the content, not the window policy.
+- Prefer value types for catalogs, pricing, VAD, caption merge, and cursor math so they stay unit-testable.
+
+```swift
+// BAD
+let key = settings.apiKey!
+
+// GOOD
+guard let key = try await keychain.load(), !key.isEmpty else { throw ChatError.missingAPIKey }
+```

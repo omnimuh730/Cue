@@ -1,0 +1,15 @@
+---
+description: Tahoe Liquid Glass visual contract for Cue
+alwaysApply: true
+---
+
+# Design philosophy
+
+Cue is a compact interview overlay with **strong Tahoe glass**, not Halo’s flat CSS.
+
+- Use SwiftUI `glassEffect` / AppKit `NSGlassEffectView` for sidebar, header, composer, settings, and popovers.
+- Prefer materials and refraction over solid fills. Flat `Color` backgrounds are for text contrast only.
+- Keep Halo’s interaction density: content-first reading column, compact chrome, one primary action per surface, 4px spacing rhythm.
+- Respect `accessibilityReduceTransparency`: fall back to opaque window background, never leave text unreadable.
+- Semantic color only (success / warning / danger). Do not invent a second brand accent.
+- Composer is the only heavy floating layer. Do not card-shadow chat messages.

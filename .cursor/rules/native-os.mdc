@@ -1,0 +1,18 @@
+---
+description: Use native macOS APIs, never Electron-style surfaces
+alwaysApply: true
+---
+
+# Native OS APIs
+
+Halo is the behavior spec. Cue must implement it with Apple frameworks.
+
+- Window: `NSPanel` + `.nonactivatingPanel`, `sharingType`, `alphaValue`, `NSStatusItem`. Not `BrowserWindow`.
+- Stealth: `NSWindow.sharingType = .none`. Not Chromium content protection.
+- Audio: ScreenCaptureKit system audio. Not `getDisplayMedia`.
+- Accessibility listen: `AXObserver` + dedicated AX run loop targeting Live Captions. Not DOM scraping.
+- Remote control: `CGEvent` taps + AppKit hit-testing. Not `webContents.sendInputEvent`.
+- Secrets: Keychain. Chat: `URLSession` SSE to the Responses API.
+- Persistence: SwiftData. Not `localStorage`.
+
+`Halo/` and `AirScript/` are read-only references. Do not compile them into Cue.

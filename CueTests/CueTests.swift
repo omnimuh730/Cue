@@ -1,19 +1,133 @@
-//
-//  CueTests.swift
-//  CueTests
-//
-//  Created by robin on 9/10/26.
-//
-
+import Foundation
 import Testing
 @testable import Cue
 
 struct CueTests {
-
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-        // Swift Testing Documentation
-        // https://developer.apple.com/documentation/testing
+    @Test func continuationUsesPreviousResponseID() {
+        let turns = [
+            ChatTurn(id: UUID(), role: .user, content: "Hi", createdAt: .now, status: .complete, attachments: []),
+            ChatTurn(
+                id: UUID(),
+                role: .assistant,
+                content: "Hello",
+                createdAt: .now,
+                status: .complete,
+                attachments: [],
+                responseID: "resp_1"
+            ),
+            ChatTurn(id: UUID(), role: .user, content: "Again", createdAt: .now, status: .complete, attachments: [])
+        ]
+        let continuation = ChatContinuationBuilder.build(from: turns)
+        #expect(continuation.previousResponseID == "resp_1")
+        #expect(continuation.inputMessages?.count == 1)
+        #expect(continuation.inputMessages?.first?.content == "Again")
     }
 
+    @Test func continuationFallsBackWithoutResponseID() {
+        let turns = [
+            ChatTurn(id: UUID(), role: .user, content: "Hi", createdAt: .now, status: .complete, attachments: []),
+            ChatTurn(id: UUID(), role: .assistant, content: "Hello", createdAt: .now, status: .complete, attachments: [])
+        ]
+        let continuation = ChatContinuationBuilder.build(from: turns)
+        #expect(continuation.previousResponseID == nil)
+        #expect(continuation.messages.count == 2)
+    }
+
+    @Test func effortNormalizesMaxForMini() {
+        #expect(ModelCatalog.normalizeEffort(.max, for: .mini) == .xhigh)
+        #expect(ModelCatalog.normalizeEffort(.low, for: .sol) == .low)
+    }
+
+    @Test func pricingUsesMiniRates() {
+        let usage = TokenUsage(inputTokens: 1_000_000, outputTokens: 1_000_000, cachedInputTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0)
+        let estimate = Pricing.estimateTurnCost(model: .mini, usage: usage, webSearchCalls: 1)
+        #expect(estimate.costUsd == 0.75 + 4.5 + 0.01)
+        #expect(Pricing.formatUsd(0) == "$0.00")
+    }
+
+    @Test func systemInstructionAppendsWebSearch() {
+        let text = SystemInstruction.buildResponseInstructions("", webSearchEnabled: true)
+        #expect(text.contains("web search"))
+        #expect(SystemInstruction.normalize(String(repeating: "a", count: 9_000)).count == 8_000)
+    }
+
+    @Test func remoteCursorClampsAndIgnoresJumps() {
+        let moved = RemoteCursorMath.applyScreenDelta(
+            virtualX: 10,
+            virtualY: 10,
+            lastScreenX: 0,
+            lastScreenY: 0,
+            screenX: 5,
+            screenY: 8,
+            width: 100,
+            height: 100
+        )
+        #expect(moved.virtualX == 15)
+        #expect(moved.virtualY == 18)
+        #expect(moved.moved)
+
+        let jump = RemoteCursorMath.applyScreenDelta(
+            virtualX: 10,
+            virtualY: 10,
+            lastScreenX: 0,
+            lastScreenY: 0,
+            screenX: 4000,
+            screenY: 0,
+            width: 100,
+            height: 100
+        )
+        #expect(jump.moved == false)
+        #expect(jump.virtualX == 10)
+    }
+
+    @Test func windowBoundsRespectWorkArea() {
+        let next = WindowBounds.clampMovedBounds(
+            RectValue(x: 10, y: 10, width: 100, height: 100),
+            workArea: RectValue(x: 0, y: 0, width: 200, height: 200),
+            dx: 500,
+            dy: 0
+        )
+        #expect(next.x == 100)
+    }
+
+    @Test func captionMergeCollapsesSameUtterance() {
+        let collapsed = CaptionTextMerge.collapse([
+            "Hello there",
+            "Hello there everyone"
+        ])
+        #expect(collapsed == ["Hello there everyone"])
+        #expect(CaptionTextMerge.isChrome("Live Captions Running"))
+    }
+
+    @Test func captionAssemblerKeepsLiveLine() {
+        var assembler = CaptionLineAssembler()
+        let first = assembler.ingest("What is Swift?")
+        let live = assembler.lines.last?.isLive == true
+        let second = assembler.ingest("What is Swift concurrency?")
+        #expect(first)
+        #expect(live)
+        #expect(second)
+        #expect(assembler.lines.count == 1)
+    }
+
+    @Test func acceleratorMatchParsesCommandShiftH() {
+        let pattern = AcceleratorMatch.parseElectronAccelerator("CommandOrControl+Shift+H")
+        #expect(pattern?.code == "KeyH")
+        #expect(pattern?.shift == true)
+        #expect(pattern?.metaOrCtrl == true)
+        let payload = KeyPayload(code: "KeyH", key: "h", altKey: false, ctrlKey: false, metaKey: true, shiftKey: true)
+        let matches = pattern.map { value in AcceleratorMatch.payloadMatches(payload, pattern: value) } ?? false
+        #expect(matches)
+    }
+
+    @Test func energyVadStartsOnSpeech() {
+        var vad = EnergyVAD(sampleRate: 16_000, speechThreshold: 0.01, silenceThreshold: 0.005, minSpeechMs: 20, minSilenceMs: 20, maxSpeechMs: 2000)
+        let speech = [Float](repeating: 0.2, count: 1600)
+        let events = vad.push(speech, chunkStartAbsolute: 0)
+        let started = events.contains { event in
+            if case .speechStart = event { return true }
+            return false
+        }
+        #expect(started)
+    }
 }
