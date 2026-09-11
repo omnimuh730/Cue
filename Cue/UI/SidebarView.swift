@@ -22,11 +22,19 @@ struct SidebarView: View {
                 .padding(.bottom, 4)
                 .allowsHitTesting(false)
 
-            ScrollView {
-                LazyVStack(spacing: 1) {
-                    ForEach(session.conversations, id: \.identifier) { conversation in
-                        conversationRow(conversation)
+            // The list fills the sidebar; empty space below the rows drags the window like the
+            // header and footer do, so the whole sidebar is a grab handle.
+            GeometryReader { geo in
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(session.conversations, id: \.identifier) { conversation in
+                            conversationRow(conversation)
+                        }
                     }
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
+                    .background { CueWindowDragSource() }
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
                 }
             }
 

@@ -8,7 +8,7 @@ struct MermaidBlockView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var height: CGFloat = 160
     @State private var error: String?
-    @State private var zoom = MermaidZoomPan()
+    @State private var magnification: CGFloat = 1
 
     var body: some View {
         // A cached height means no layout jump when a diagram scrolls back into view.
@@ -28,23 +28,15 @@ struct MermaidBlockView: View {
                     if abs(next - height) > 1 { height = next }
                 }, onError: { message in
                     error = message
+                }, onMagnification: { next in
+                    magnification = next
                 })
                 .frame(height: min(max(shownHeight, 80), 900))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .scaleEffect(zoom.scale)
-                .offset(zoom.offset)
-                .clipped()
-                .overlay {
-                    GeometryReader { geo in
-                        MermaidZoomCatcher(state: $zoom, size: geo.size)
-                            .onChange(of: geo.size) { _, size in
-                                zoom.clamp(in: size)
-                            }
-                    }
-                }
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(alignment: .bottomTrailing) {
-                    if zoom.scale > 1.01 {
-                        Text("\(Int((zoom.scale * 100).rounded()))%")
+                    if magnification > 1.01 {
+                        Text("\(Int((magnification * 100).rounded()))%")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, CueTheme.Spacing.xs)
@@ -52,211 +44,53 @@ struct MermaidBlockView: View {
                             .background(.thinMaterial, in: Capsule())
                             .padding(CueTheme.Spacing.xs)
                             .allowsHitTesting(false)
+                            .transition(.opacity)
                     }
                 }
-                .help("Pinch or ⌘-scroll to zoom. Drag to pan when zoomed. Double-click to reset.")
+                .animation(.easeOut(duration: 0.15), value: magnification > 1.01)
+                .help("Pinch or ⌘-scroll to zoom. Scroll or drag to pan when zoomed. Double-click to reset.")
             }
         }
         .onChange(of: source) { _, _ in
             error = nil
-            zoom.reset()
+            magnification = 1
         }
     }
 }
 
-/// Pinch / ⌘-scroll zoom with drag pan once the scaled diagram is larger than its frame.
-struct MermaidZoomPan: Equatable {
-    var scale: CGFloat = 1
-    var offset: CGSize = .zero
-
+/// Zoom arithmetic for the diagram web view, kept pure so it is unit-testable.
+nonisolated enum MermaidZoom {
     static let minScale: CGFloat = 1
     static let maxScale: CGFloat = 5
 
-    var canPan: Bool { scale > 1.001 }
-
-    mutating func reset() {
-        scale = 1
-        offset = .zero
+    static func clamp(_ scale: CGFloat) -> CGFloat {
+        guard scale.isFinite else { return minScale }
+        return min(max(scale, minScale), maxScale)
     }
 
-    mutating func zoom(by factor: CGFloat, toward point: CGPoint, in size: CGSize) {
-        let old = scale
-        guard old > 0, factor.isFinite, factor > 0 else { return }
-        let next = min(max(old * factor, Self.minScale), Self.maxScale)
-        guard abs(next - old) > 0.0001 else { return }
-        let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        let cursor = CGSize(width: point.x - center.x, height: point.y - center.y)
-        let ratio = next / old
-        offset = CGSize(
-            width: cursor.width - (cursor.width - offset.width) * ratio,
-            height: cursor.height - (cursor.height - offset.height) * ratio
+    /// ⌘-scroll: one full notch (or 200 precise points) doubles or halves the magnification.
+    static func factor(forScrollDelta delta: CGFloat, precise: Bool) -> CGFloat {
+        guard delta.isFinite else { return 1 }
+        return pow(2, delta / (precise ? 200 : 20))
+    }
+
+    /// Converts a scroll-wheel delta into a CSS-pixel `window.scrollBy` at the given magnification.
+    /// AppKit's natural scrolling reports positive deltas when content should move down/right,
+    /// which is a negative page scroll.
+    static func panDelta(scrollDeltaX dx: CGFloat, scrollDeltaY dy: CGFloat, magnification: CGFloat) -> CGSize {
+        let scale = max(magnification, 0.001)
+        return CGSize(width: -dx / scale, height: -dy / scale)
+    }
+
+    /// Page scroll position that keeps the content under the cursor while dragging.
+    /// `start`/`current` are in a top-left-origin (flipped) view space; the content follows the
+    /// cursor, so the page scrolls opposite to the drag, in CSS px at the current magnification.
+    static func dragScrollTarget(anchorScroll: CGPoint, start: CGPoint, current: CGPoint, magnification: CGFloat) -> CGPoint {
+        let scale = max(magnification, 0.001)
+        return CGPoint(
+            x: max(0, anchorScroll.x - (current.x - start.x) / scale),
+            y: max(0, anchorScroll.y - (current.y - start.y) / scale)
         )
-        scale = next
-        clamp(in: size)
-    }
-
-    mutating func pan(by delta: CGSize, in size: CGSize) {
-        guard canPan else { return }
-        offset = CGSize(width: offset.width + delta.width, height: offset.height + delta.height)
-        clamp(in: size)
-    }
-
-    mutating func clamp(in size: CGSize) {
-        scale = min(max(scale, Self.minScale), Self.maxScale)
-        if scale <= 1.001 {
-            scale = 1
-            offset = .zero
-            return
-        }
-        guard size.width > 0, size.height > 0 else { return }
-        let extraX = max(0, size.width * (scale - 1) / 2)
-        let extraY = max(0, size.height * (scale - 1) / 2)
-        offset.width = min(max(offset.width, -extraX), extraX)
-        offset.height = min(max(offset.height, -extraY), extraY)
-    }
-}
-
-/// Sits above the web view so pinch, ⌘-scroll, and drag work even while Cue is a nonactivating panel.
-private struct MermaidZoomCatcher: NSViewRepresentable {
-    @Binding var state: MermaidZoomPan
-    var size: CGSize
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(state: $state, size: size)
-    }
-
-    func makeNSView(context: Context) -> CatcherView {
-        let view = CatcherView()
-        view.coordinator = context.coordinator
-        return view
-    }
-
-    func updateNSView(_ view: CatcherView, context: Context) {
-        context.coordinator.state = $state
-        context.coordinator.size = size
-        view.coordinator = context.coordinator
-        view.window?.invalidateCursorRects(for: view)
-    }
-
-    final class Coordinator {
-        var state: Binding<MermaidZoomPan>
-        var size: CGSize
-        var lastPoint: CGPoint?
-
-        init(state: Binding<MermaidZoomPan>, size: CGSize) {
-            self.state = state
-            self.size = size
-        }
-
-        func apply(_ body: (inout MermaidZoomPan) -> Void) {
-            var next = state.wrappedValue
-            body(&next)
-            state.wrappedValue = next
-        }
-    }
-
-    final class CatcherView: NSView {
-        var coordinator: Coordinator?
-
-        override init(frame: NSRect) {
-            super.init(frame: frame)
-            wantsLayer = true
-            layer?.backgroundColor = .clear
-        }
-
-        required init?(coder: NSCoder) { nil }
-
-        override var isOpaque: Bool { false }
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            bounds.contains(point) ? self : nil
-        }
-
-        override func resetCursorRects() {
-            if coordinator?.state.wrappedValue.canPan == true {
-                addCursorRect(bounds, cursor: .openHand)
-            }
-        }
-
-        override func magnify(with event: NSEvent) {
-            let target = point(of: event)
-            let size = viewportSize
-            coordinator?.apply { $0.zoom(by: 1 + event.magnification, toward: target, in: size) }
-        }
-
-        override func smartMagnify(with event: NSEvent) {
-            let target = point(of: event)
-            let size = viewportSize
-            coordinator?.apply { zoom in
-                if zoom.canPan {
-                    zoom.reset()
-                } else {
-                    zoom.zoom(by: 2, toward: target, in: size)
-                }
-            }
-        }
-
-        override func scrollWheel(with event: NSEvent) {
-            let command = event.modifierFlags.contains(.command)
-            if command {
-                let divisor: CGFloat = event.hasPreciseScrollingDeltas ? 200 : 20
-                let factor = pow(2, event.scrollingDeltaY / divisor)
-                let target = point(of: event)
-                let size = viewportSize
-                coordinator?.apply { $0.zoom(by: factor, toward: target, in: size) }
-                return
-            }
-            if coordinator?.state.wrappedValue.canPan == true {
-                let delta = CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
-                var next = coordinator?.state.wrappedValue ?? MermaidZoomPan()
-                let before = next.offset
-                next.pan(by: delta, in: viewportSize)
-                if next.offset != before {
-                    coordinator?.state.wrappedValue = next
-                    return
-                }
-            }
-            super.scrollWheel(with: event)
-        }
-
-        override func mouseDown(with event: NSEvent) {
-            if event.clickCount == 2 {
-                coordinator?.lastPoint = nil
-                withAnimation(.easeOut(duration: 0.18)) {
-                    coordinator?.apply { $0.reset() }
-                }
-                window?.invalidateCursorRects(for: self)
-                return
-            }
-            guard coordinator?.state.wrappedValue.canPan == true else { return }
-            coordinator?.lastPoint = point(of: event)
-            NSCursor.closedHand.set()
-        }
-
-        override func mouseDragged(with event: NSEvent) {
-            guard let last = coordinator?.lastPoint else { return }
-            let current = point(of: event)
-            let size = viewportSize
-            coordinator?.lastPoint = current
-            coordinator?.apply {
-                $0.pan(by: CGSize(width: current.x - last.x, height: current.y - last.y), in: size)
-            }
-        }
-
-        override func mouseUp(with event: NSEvent) {
-            coordinator?.lastPoint = nil
-            window?.invalidateCursorRects(for: self)
-        }
-
-        private func point(of event: NSEvent) -> CGPoint {
-            let local = convert(event.locationInWindow, from: nil)
-            return CGPoint(x: local.x, y: bounds.height - local.y)
-        }
-
-        private var viewportSize: CGSize {
-            coordinator?.size ?? bounds.size
-        }
     }
 }
 
@@ -305,10 +139,119 @@ enum MermaidRenderCache {
     }
 }
 
+/// WKWebView with page magnification exposed as the diagram's zoom. Pinch and smart-zoom are
+/// native; ⌘-scroll zooms toward the cursor, scroll/drag pan while zoomed, double-click resets.
+/// Unzoomed scrolls are handed up so the chat keeps scrolling through diagrams.
+final class MermaidWebContentView: WKWebView {
+    var onMagnification: ((CGFloat) -> Void)?
+    /// Drag-pan state: where the drag began and what the page scroll was at that moment.
+    private var dragStart: CGPoint?
+    private var dragAnchorScroll: CGPoint?
+    private var dragLatest: CGPoint?
+
+    var isZoomed: Bool { magnification > 1.001 }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func magnify(with event: NSEvent) {
+        super.magnify(with: event)
+        clampAndReport()
+    }
+
+    override func smartMagnify(with event: NSEvent) {
+        super.smartMagnify(with: event)
+        clampAndReport()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        if event.modifierFlags.contains(.command) {
+            let factor = MermaidZoom.factor(forScrollDelta: event.scrollingDeltaY, precise: event.hasPreciseScrollingDeltas)
+            setMagnification(MermaidZoom.clamp(magnification * factor), centeredAt: convert(event.locationInWindow, from: nil))
+            clampAndReport()
+            return
+        }
+        if isZoomed {
+            let delta = MermaidZoom.panDelta(scrollDeltaX: event.scrollingDeltaX, scrollDeltaY: event.scrollingDeltaY, magnification: magnification)
+            scrollPage(by: delta)
+            return
+        }
+        nextResponder?.scrollWheel(with: event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            setMagnification(1, centeredAt: convert(event.locationInWindow, from: nil))
+            clampAndReport()
+            return
+        }
+        guard isZoomed else { return super.mouseDown(with: event) }
+        let start = flippedPoint(event)
+        dragStart = start
+        dragLatest = start
+        dragAnchorScroll = nil
+        NSCursor.closedHand.set()
+        // Anchor on the page's actual scroll offset so the content stays glued to the cursor.
+        evaluateJavaScript("[window.scrollX, window.scrollY]") { [weak self] value, _ in
+            guard let self, dragStart == start, let pair = value as? [Double], pair.count == 2 else { return }
+            dragAnchorScroll = CGPoint(x: pair[0], y: pair[1])
+            if let latest = dragLatest { applyDrag(to: latest) }
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard dragStart != nil else { return super.mouseDragged(with: event) }
+        let current = flippedPoint(event)
+        dragLatest = current
+        applyDrag(to: current)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragStart != nil else { return super.mouseUp(with: event) }
+        dragStart = nil
+        dragLatest = nil
+        dragAnchorScroll = nil
+        window?.invalidateCursorRects(for: self)
+    }
+
+    private func applyDrag(to point: CGPoint) {
+        guard let start = dragStart, let anchor = dragAnchorScroll else { return }
+        let target = MermaidZoom.dragScrollTarget(anchorScroll: anchor, start: start, current: point, magnification: magnification)
+        evaluateJavaScript("window.scrollTo(\(target.x), \(target.y))") { _, _ in }
+    }
+
+    /// Event location in a top-left-origin space regardless of the view's `isFlipped`.
+    private func flippedPoint(_ event: NSEvent) -> CGPoint {
+        let local = convert(event.locationInWindow, from: nil)
+        return isFlipped ? local : CGPoint(x: local.x, y: bounds.height - local.y)
+    }
+
+    override func resetCursorRects() {
+        if isZoomed { addCursorRect(bounds, cursor: .openHand) }
+    }
+
+    private func scrollPage(by delta: CGSize) {
+        guard delta.width.isFinite, delta.height.isFinite else { return }
+        evaluateJavaScript("window.scrollBy(\(delta.width), \(delta.height))") { _, _ in }
+    }
+
+    private func clampAndReport() {
+        let clamped = MermaidZoom.clamp(magnification)
+        if abs(clamped - magnification) > 0.001 {
+            setMagnification(clamped, centeredAt: CGPoint(x: bounds.midX, y: bounds.midY))
+        }
+        if !isZoomed {
+            evaluateJavaScript("window.scrollTo(0, 0)") { _, _ in }
+        }
+        window?.invalidateCursorRects(for: self)
+        onMagnification?(magnification)
+    }
+}
+
 private struct MermaidWebView: NSViewRepresentable {
     var source: String
     var onHeight: (CGFloat) -> Void
     var onError: (String) -> Void
+    var onMagnification: (CGFloat) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -317,13 +260,14 @@ private struct MermaidWebView: NSViewRepresentable {
     private static let dataStore = WKWebsiteDataStore.nonPersistent()
     private static let hostURL = Bundle.main.url(forResource: "mermaid-host", withExtension: "html")
 
-    func makeNSView(context: Context) -> WKWebView {
+    func makeNSView(context: Context) -> MermaidWebContentView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = Self.dataStore
         config.userContentController.add(context.coordinator, name: Coordinator.channel)
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = MermaidWebContentView(frame: .zero, configuration: config)
         view.setValue(false, forKey: "drawsBackground")
-        view.allowsMagnification = false
+        view.allowsMagnification = true
+        view.onMagnification = onMagnification
         view.navigationDelegate = context.coordinator
         if let host = Self.hostURL {
             view.loadFileURL(host, allowingReadAccessTo: host.deletingLastPathComponent())
@@ -333,13 +277,18 @@ private struct MermaidWebView: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: WKWebView, context: Context) {
+    func updateNSView(_ view: MermaidWebContentView, context: Context) {
         let coordinator = context.coordinator
         coordinator.onHeight = onHeight
         coordinator.onError = onError
+        view.onMagnification = onMagnification
         let theme = colorScheme == .dark ? "dark" : "neutral"
         let key = MermaidRenderCache.key(source: source, theme: theme)
         guard coordinator.pendingKey != key else { return }
+        if coordinator.pendingKey != nil, view.isZoomed {
+            view.setMagnification(1, centeredAt: .zero)
+            onMagnification(1)
+        }
         coordinator.pendingKey = key
         coordinator.pendingSource = source
         coordinator.pendingTheme = theme
@@ -347,7 +296,7 @@ private struct MermaidWebView: NSViewRepresentable {
         coordinator.renderIfReady(in: view)
     }
 
-    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+    static func dismantleNSView(_ view: MermaidWebContentView, coordinator: Coordinator) {
         view.configuration.userContentController.removeScriptMessageHandler(forName: Coordinator.channel)
         view.navigationDelegate = nil
     }

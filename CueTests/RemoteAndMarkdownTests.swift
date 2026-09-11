@@ -133,38 +133,30 @@ struct RemoteAndMarkdownTests {
         ])
     }
 
-    @Test func mermaidZoomPanClampsAndUnlocksDragAfterOverflow() {
-        var zoom = MermaidZoomPan()
-        let size = CGSize(width: 200, height: 100)
-        zoom.pan(by: CGSize(width: 40, height: 10), in: size)
-        #expect(zoom.scale == 1)
-        #expect(zoom.offset == .zero)
-        #expect(!zoom.canPan)
+    @Test func mermaidZoomMathClampsAndConverts() {
+        #expect(MermaidZoom.clamp(0.2) == 1)
+        #expect(MermaidZoom.clamp(3) == 3)
+        #expect(MermaidZoom.clamp(50) == MermaidZoom.maxScale)
+        #expect(MermaidZoom.clamp(.nan) == 1)
 
-        zoom.zoom(by: 2, toward: CGPoint(x: 100, y: 50), in: size)
-        #expect(zoom.scale == 2)
-        #expect(zoom.offset == .zero)
-        #expect(zoom.canPan)
+        // One legacy notch doubles; 200 precise points double; negative halves.
+        #expect(MermaidZoom.factor(forScrollDelta: 20, precise: false) == 2)
+        #expect(MermaidZoom.factor(forScrollDelta: 200, precise: true) == 2)
+        #expect(abs(MermaidZoom.factor(forScrollDelta: -20, precise: false) - 0.5) < 0.0001)
 
-        zoom.pan(by: CGSize(width: 1000, height: 1000), in: size)
-        #expect(zoom.offset.width == 100)
-        #expect(zoom.offset.height == 50)
+        // Natural scrolling: content down/right (positive deltas) is a negative page scroll, in CSS px.
+        let pan = MermaidZoom.panDelta(scrollDeltaX: 10, scrollDeltaY: -4, magnification: 2)
+        #expect(pan.width == -5)
+        #expect(pan.height == 2)
 
-        zoom.reset()
-        #expect(zoom.scale == 1)
-        #expect(zoom.offset == .zero)
-    }
-
-    @Test func mermaidZoomKeepsPointUnderCursor() {
-        var zoom = MermaidZoomPan()
-        let size = CGSize(width: 200, height: 100)
-        zoom.zoom(by: 2, toward: CGPoint(x: 0, y: 50), in: size)
-        #expect(zoom.scale == 2)
-        #expect(zoom.offset.width == 100)
-        #expect(abs(zoom.offset.height) < 0.001)
-
-        zoom.zoom(by: 10, toward: CGPoint(x: 100, y: 50), in: size)
-        #expect(zoom.scale == MermaidZoomPan.maxScale)
+        // Dragging right/down (flipped view space) keeps content under the cursor: the page scrolls left/up.
+        let anchor = CGPoint(x: 100, y: 80)
+        let target = MermaidZoom.dragScrollTarget(anchorScroll: anchor, start: CGPoint(x: 0, y: 0), current: CGPoint(x: 30, y: 10), magnification: 2)
+        #expect(target.x == 85)
+        #expect(target.y == 75)
+        // Never scrolls past the page origin.
+        let clamped = MermaidZoom.dragScrollTarget(anchorScroll: .zero, start: .zero, current: CGPoint(x: 50, y: 50), magnification: 1)
+        #expect(clamped == .zero)
     }
 }
 
