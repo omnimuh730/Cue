@@ -17,6 +17,7 @@ struct SidebarView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
                 .padding(.bottom, 4)
+                .allowsHitTesting(false)
 
             ScrollView {
                 LazyVStack(spacing: 1) {
@@ -27,6 +28,8 @@ struct SidebarView: View {
             }
 
             Spacer(minLength: 8)
+                .contentShape(Rectangle())
+                .gesture(WindowDragGesture())
 
             navRow(title: "Settings", symbol: "gear") {
                 session.settingsOpen = true
@@ -54,6 +57,7 @@ struct SidebarView: View {
 
             Text("Cue")
                 .font(.system(size: 15, weight: .semibold))
+                .allowsHitTesting(false)
             Spacer()
             Button {
                 session.newChat()
@@ -68,6 +72,8 @@ struct SidebarView: View {
         }
         .padding(.horizontal, 4)
         .padding(.bottom, 8)
+        .contentShape(Rectangle())
+        .gesture(WindowDragGesture())
     }
 
     private func navRow(title: String, symbol: String, action: @escaping () -> Void) -> some View {

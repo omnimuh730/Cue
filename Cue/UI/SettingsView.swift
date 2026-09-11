@@ -36,6 +36,8 @@ struct SettingsView: View {
     @State private var saveError: String?
     @State private var clearKey = false
     @State private var replacingKey = false
+    @State private var recording: HotkeyAction?
+    @State private var recorder = HotkeyRecordingController()
 
     var body: some View {
         ZStack {
@@ -66,6 +68,10 @@ struct SettingsView: View {
             clearKey = false
             replacingKey = false
             saveError = nil
+            stopRecording(restoreHotkeys: false)
+        }
+        .onDisappear {
+            stopRecording(restoreHotkeys: true)
         }
     }
 
@@ -92,6 +98,9 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(SettingsSection.allCases) { item in
                 Button {
+                    if item != .hotkeys {
+                        stopRecording(restoreHotkeys: true)
+                    }
                     section = item
                 } label: {
                     Label(item.title, systemImage: item.symbol)
@@ -234,14 +243,90 @@ struct SettingsView: View {
             CueGlassField(title: "Opacity") {
                 Slider(value: $draft.windowOpacity, in: 0.15...1)
             }
-            ForEach(HotkeyCatalog.items) { item in
-                CueGlassField(title: item.label, help: item.description) {
-                    TextField("Shortcut", text: binding(for: item.id))
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13, design: .monospaced))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Global hotkeys")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Click a shortcut, then press the new combination. Esc cancels.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 4)
+
+            ForEach(HotkeyGroup.allCases) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(group.rawValue)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                    VStack(spacing: 0) {
+                        ForEach(Array(HotkeyCatalog.items(in: group).enumerated()), id: \.element.id) { index, item in
+                            hotkeyRow(item)
+                            if index < HotkeyCatalog.items(in: group).count - 1 {
+                                Divider().opacity(0.12)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .cueGlass(cornerRadius: 18, interactive: true)
                 }
             }
+
+            Button("Reset defaults") {
+                draft.setHotkeys(HotkeyCatalog.defaults)
+                stopRecording(restoreHotkeys: true)
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.secondary)
         }
+    }
+
+    private func hotkeyRow(_ item: HotkeyDefinition) -> some View {
+        let accelerator = draft.hotkeyMap[item.id] ?? HotkeyCatalog.defaults[item.id] ?? ""
+        let isCustom = accelerator != (HotkeyCatalog.defaults[item.id] ?? "")
+        let conflict = HotkeyCatalog.conflict(for: item.id, in: draft.hotkeyMap)
+
+        return HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.label)
+                    .font(.system(size: 13, weight: .medium))
+                Text(item.description)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if isCustom {
+                Button {
+                    assign(HotkeyCatalog.defaults[item.id] ?? accelerator, to: item.id)
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("Restore default")
+            }
+            HotkeyChip(
+                accelerator: accelerator,
+                isRecording: recording == item.id,
+                conflict: conflict?.label,
+                onRecord: {
+                    if recording == item.id {
+                        stopRecording(restoreHotkeys: true)
+                    } else {
+                        beginRecording(item.id)
+                    }
+                }
+            )
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.label), \(HotkeyFormat.displayLabel(for: accelerator))")
+        .accessibilityHint("Click the shortcut to record a new key combination")
     }
 
     private var data: some View {
@@ -296,6 +381,7 @@ struct SettingsView: View {
     }
 
     private func save() {
+        stopRecording(restoreHotkeys: false)
         NSApp.keyWindow?.makeFirstResponder(nil)
         saveError = nil
         let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -308,18 +394,40 @@ struct SettingsView: View {
             session.settingsOpen = false
         } catch {
             saveError = error.localizedDescription
+            session.hotkeys.register(session.settings.hotkeyMap)
         }
     }
 
-    private func binding(for action: HotkeyAction) -> Binding<String> {
-        Binding(
-            get: { draft.hotkeyMap[action] ?? "" },
-            set: { value in
-                var map = draft.hotkeyMap
-                map[action] = value
-                draft.setHotkeys(map)
-            }
-        )
+    private func beginRecording(_ action: HotkeyAction) {
+        let draftBinding = $draft
+        let recordingBinding = $recording
+        let session = session
+        session.hotkeys.unregister()
+        recording = action
+        recorder.start(action) { action, accelerator in
+            var map = draftBinding.wrappedValue.hotkeyMap
+            map[action] = accelerator
+            draftBinding.wrappedValue.setHotkeys(map)
+            recordingBinding.wrappedValue = nil
+            session.hotkeys.register(session.settings.hotkeyMap)
+        } cancel: {
+            recordingBinding.wrappedValue = nil
+            session.hotkeys.register(session.settings.hotkeyMap)
+        }
+    }
+
+    private func stopRecording(restoreHotkeys: Bool) {
+        recorder.stop()
+        recording = nil
+        if restoreHotkeys {
+            session.hotkeys.register(session.settings.hotkeyMap)
+        }
+    }
+
+    private func assign(_ accelerator: String, to action: HotkeyAction) {
+        var map = draft.hotkeyMap
+        map[action] = accelerator
+        draft.setHotkeys(map)
     }
 
     private func exportActive() {

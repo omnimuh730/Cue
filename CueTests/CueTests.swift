@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Cue
@@ -43,6 +44,29 @@ struct CueTests {
         #expect(groups.map(\.group) == ["GPT-5.6", "GPT-5.4"])
         #expect(groups[0].models.map(\.id) == [.sol, .terra, .luna])
         #expect(groups[1].models.map(\.id) == [.mini])
+    }
+
+    @Test func hotkeyFormatUsesMacKeycaps() {
+        #expect(HotkeyFormat.keycaps(for: "CommandOrControl+Shift+H") == ["⌘", "⇧", "H"])
+        #expect(HotkeyFormat.keycaps(for: "CommandOrControl+Alt+Up") == ["⌘", "⌥", "↑"])
+        #expect(HotkeyFormat.keycaps(for: "CommandOrControl+num4") == ["⌘", "4"])
+        #expect(HotkeyFormat.displayLabel(for: "CommandOrControl+Alt+Backspace") == "⌘ ⌥ ⌫")
+    }
+
+    @Test func hotkeyFormatRecordsCommandShiftH() {
+        let accelerator = HotkeyFormat.accelerator(keyCode: 0x04, flags: [.command, .shift], characters: "h")
+        #expect(accelerator == "CommandOrControl+Shift+H")
+        #expect(HotkeyFormat.isRegisterable(accelerator ?? ""))
+        #expect(HotkeyFormat.accelerator(keyCode: 53, flags: [], characters: "\u{1b}") == nil)
+        #expect(HotkeyFormat.accelerator(keyCode: 0x04, flags: [], characters: "h") == nil)
+    }
+
+    @Test func hotkeyConflictDetectsDuplicate() {
+        var map = HotkeyCatalog.defaults
+        map[.newChat] = map[.toggleShowHide]
+        let conflict = HotkeyCatalog.conflict(for: .newChat, in: map)
+        #expect(conflict?.id == .toggleShowHide)
+        #expect(HotkeyCatalog.conflict(for: .cycleEffort, in: HotkeyCatalog.defaults) == nil)
     }
 
     @Test func pricingUsesMiniRates() {

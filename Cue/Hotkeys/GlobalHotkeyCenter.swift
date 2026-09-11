@@ -124,21 +124,37 @@ nonisolated struct CarbonHotkey: Sendable {
         case "Enter": return 0x24
         case "KeyL": return 0x25
         case "KeyJ": return 0x26
+        case "Quote": return 0x27
         case "KeyK": return 0x28
+        case "Semicolon": return 0x29
+        case "Backslash": return 0x2A
+        case "Comma": return 0x2B
+        case "Slash": return 0x2C
         case "KeyN": return 0x2D
         case "KeyM": return 0x2E
+        case "Period": return 0x2F
         case "Tab": return 0x30
         case "Space": return 0x31
+        case "Backquote": return 0x32
         case "Backspace": return 0x33
         case "Escape": return 0x35
         case "ArrowLeft": return 0x7B
         case "ArrowRight": return 0x7C
         case "ArrowDown": return 0x7D
         case "ArrowUp": return 0x7E
+        case "Delete": return 0x75
+        case "BracketLeft": return 0x21
+        case "BracketRight": return 0x1E
+        case "Numpad0": return 0x52
+        case "Numpad1": return 0x53
         case "Numpad2": return 0x54
+        case "Numpad3": return 0x55
         case "Numpad4": return 0x56
+        case "Numpad5": return 0x57
         case "Numpad6": return 0x58
+        case "Numpad7": return 0x59
         case "Numpad8": return 0x5B
+        case "Numpad9": return 0x5C
         default: return nil
         }
     }

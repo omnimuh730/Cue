@@ -31,11 +31,13 @@ nonisolated enum HotkeyAction: String, Codable, CaseIterable, Sendable, Identifi
     var id: String { rawValue }
 }
 
-nonisolated enum HotkeyGroup: String, Sendable {
+nonisolated enum HotkeyGroup: String, Sendable, CaseIterable, Identifiable {
     case window = "Window"
     case audio = "Audio"
     case chat = "Chat"
     case capture = "Capture"
+
+    var id: String { rawValue }
 }
 
 nonisolated struct HotkeyDefinition: Equatable, Sendable, Identifiable {
@@ -117,13 +119,16 @@ nonisolated enum HotkeyCatalog {
         return next
     }
 
+    static func items(in group: HotkeyGroup) -> [HotkeyDefinition] {
+        items.filter { $0.group == group }
+    }
+
+    static func conflict(for action: HotkeyAction, in map: HotkeyMap) -> HotkeyDefinition? {
+        guard let value = map[action] else { return nil }
+        return items.first { $0.id != action && map[$0.id] == value }
+    }
+
     static func displayLabel(for accelerator: String) -> String {
-        accelerator
-            .replacingOccurrences(of: "CommandOrControl", with: "⌘")
-            .replacingOccurrences(of: "Command", with: "⌘")
-            .replacingOccurrences(of: "Control", with: "⌃")
-            .replacingOccurrences(of: "Alt", with: "⌥")
-            .replacingOccurrences(of: "Shift", with: "⇧")
-            .replacingOccurrences(of: "+", with: " ")
+        HotkeyFormat.displayLabel(for: accelerator)
     }
 }

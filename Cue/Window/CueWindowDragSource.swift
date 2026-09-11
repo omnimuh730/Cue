@@ -1,8 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Transparent AppKit region that moves the Cue panel. Clicks on SwiftUI
-/// controls in front of it still go to those controls.
 final class CueWindowDragNSView: NSView {
     override var mouseDownCanMoveWindow: Bool { true }
 
@@ -25,6 +23,8 @@ extension View {
     func cueWindowDrag() -> some View {
         background {
             CueWindowDragSource()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .gesture(WindowDragGesture())
     }
 }
