@@ -158,15 +158,24 @@ nonisolated enum CodexPrompt {
     }
 
     /// The Codex thread carries history, so each turn sends only the newest user message,
-    /// optionally preceded by the project map catalog.
-    static func build(messages: [ChatRequestMessage], catalog: String?) -> String {
-        var user = messages.last { $0.role == .user && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?.content
-            ?? "Please continue from the current project context."
+    /// optionally preceded by the project map catalog and the text of any attached files.
+    static func build(messages: [ChatRequestMessage], catalog: String?, project: ProjectContext? = nil) -> String {
+        let last = messages.last { $0.role == .user }
+        var user = last.flatMap { $0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.content }
+            ?? (last?.attachments.isEmpty == false ? "Please read the attached files." : "Please continue from the current project context.")
         user = user.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed = catalog?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
-            return user
+        var sections: [String] = []
+        if let block = project?.promptBlock() {
+            sections.append(block)
         }
-        return "Project map catalog (use this to locate files before searching the tree):\n\n\(trimmed)\n\nUser question:\n\(user)"
+        if let trimmed = catalog?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            sections.append("Project map catalog (use this to locate files before searching the tree):\n\n\(trimmed)")
+        }
+        if let last, let attached = AttachmentPrompt.text(for: last.attachments, includePDFText: true) {
+            sections.append(attached)
+        }
+        guard !sections.isEmpty else { return user }
+        return sections.joined(separator: "\n\n") + "\n\nUser question:\n\(user)"
     }
 }
 

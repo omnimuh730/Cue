@@ -10,25 +10,32 @@ struct SidebarView: View {
             navRow(title: "Search chats", symbol: "magnifyingglass") {
                 session.searchOpen = true
             }
-            navRow(title: "Load project", symbol: "folder") {
-                session.openProjectFolder()
+            navRow(title: "New project", symbol: "folder.badge.plus") {
+                session.newProjectPromptOpen = true
             }
-
-            Text("Recents")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
-                .padding(.bottom, 4)
-                .allowsHitTesting(false)
 
             // The list fills the sidebar; empty space below the rows drags the window like the
             // header and footer do, so the whole sidebar is a grab handle.
             GeometryReader { geo in
                 ScrollView {
                     LazyVStack(spacing: 1) {
-                        ForEach(session.conversations, id: \.identifier) { conversation in
+                        if !session.projects.isEmpty {
+                            sectionTitle("Projects")
+                            workspaceRow(nil)
+                            ForEach(session.projects, id: \.identifier) { project in
+                                workspaceRow(project)
+                            }
+                        }
+                        sectionTitle(session.selectedProject.map { "Chats in \($0.name)" } ?? "Recents")
+                        ForEach(session.visibleConversations, id: \.identifier) { conversation in
                             conversationRow(conversation)
+                        }
+                        if session.visibleConversations.isEmpty {
+                            Text("No chats yet.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
                         }
                     }
                     .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
@@ -87,6 +94,92 @@ struct SidebarView: View {
         .gesture(WindowDragGesture())
     }
 
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+            .allowsHitTesting(false)
+    }
+
+    /// One workspace: nil is "All chats"; a project filters the list and hosts new chats.
+    private func workspaceRow(_ project: Project?) -> some View {
+        let id = project?.identifier
+        let isActive = session.selectedProjectID == id
+        let isHovered = hoveredID == (id ?? Self.allChatsHoverID)
+        let streaming = project.map { p in session.conversations.contains { $0.projectID == p.identifier && session.isStreaming($0) } } ?? false
+
+        return HStack(spacing: 0) {
+            Button {
+                session.selectWorkspace(id)
+            } label: {
+                HStack(spacing: 8) {
+                    if let project {
+                        WorkspaceAvatar(letter: ProjectPaths.avatarLetter(project.name), isProject: true)
+                    } else {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 26, height: 26)
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(project?.name ?? "All chats")
+                            .font(.system(size: 13, weight: isActive ? .medium : .regular))
+                            .lineLimit(1)
+                        if let project, let folder = project.codeFolder {
+                            Label(ProjectPaths.displayPath(folder), systemImage: "chevron.left.forwardslash.chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    if streaming {
+                        StreamingIndicator()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 6)
+                .padding(.trailing, 6)
+                .frame(minHeight: 34)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(project?.name ?? "All chats")
+
+            if let project {
+                Button {
+                    session.projectSettingsID = project.identifier
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Project settings: instructions, knowledge, code folder")
+                .accessibilityLabel("Project settings")
+                .opacity(isHovered || isActive ? 0.9 : 0)
+                .padding(.trailing, 2)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: CueTheme.radiusRow, style: .continuous)
+                .fill(rowFill(isActive: isActive, isHovered: isHovered))
+        )
+        .onHover { hovering in
+            let key = id ?? Self.allChatsHoverID
+            hoveredID = hovering ? key : (hoveredID == key ? nil : hoveredID)
+        }
+    }
+
+    private static let allChatsHoverID = UUID()
+
     private func navRow(title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: symbol)
@@ -127,7 +220,7 @@ struct SidebarView: View {
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                                 .transition(.opacity)
-                        } else if let project {
+                        } else if let project, session.selectedProjectID == nil {
                             Text(project.name)
                                 .font(.system(size: 11))
                                 .foregroundStyle(.tertiary)
@@ -148,7 +241,7 @@ struct SidebarView: View {
                 .padding(.leading, 10)
                 .padding(.trailing, 6)
                 .frame(minHeight: 34)
-                .padding(.vertical, status == nil && project == nil ? 0 : 4)
+                .padding(.vertical, status == nil && (project == nil || session.selectedProjectID != nil) ? 0 : 4)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -179,6 +272,7 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
                 .help(streaming ? "Stop and delete" : "Delete chat")
+                .accessibilityLabel("Delete chat")
             }
             .opacity(isHovered || isActive ? 0.9 : 0)
             .padding(.trailing, 2)

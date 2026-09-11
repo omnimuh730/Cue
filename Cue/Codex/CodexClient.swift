@@ -8,6 +8,8 @@ nonisolated struct CodexTurnRequest: Sendable {
     var projectPath: String
     var threadID: String?
     var prompt: String
+    /// Images from the newest user message, passed to `codex exec --image`.
+    var images: [MessageAttachment] = []
 }
 
 nonisolated enum CodexError: LocalizedError {
@@ -53,7 +55,7 @@ struct CodexClient {
         }
     }
 
-    private static func arguments(for request: CodexTurnRequest) -> [String] {
+    private static func arguments(for request: CodexTurnRequest, imagePaths: [String]) -> [String] {
         var args = [
             "exec", "--experimental-json",
             "--model", request.model.rawValue,
@@ -63,10 +65,27 @@ struct CodexClient {
             "--config", "model_reasoning_effort=\"\(CodexPrompt.reasoningEffort(request.effort))\"",
             "--config", "approval_policy=\"never\""
         ]
+        for path in imagePaths {
+            args += ["--image", path]
+        }
         if let threadID = request.threadID, !threadID.isEmpty {
             args += ["resume", threadID]
         }
         return args
+    }
+
+    /// Codex takes images by path, so attachments are written to a private temp folder for the turn.
+    private static func writeImages(_ images: [MessageAttachment]) -> (directory: URL, paths: [String]) {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "cue-codex-\(UUID().uuidString)")
+        var paths: [String] = []
+        guard !images.isEmpty else { return (directory, paths) }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for image in images where image.kind == .image {
+            guard let payload = image.dataURL.split(separator: ",").last, let data = Data(base64Encoded: String(payload)) else { continue }
+            let url = directory.appending(path: "\(image.id).jpg")
+            if (try? data.write(to: url)) != nil { paths.append(url.path) }
+        }
+        return (directory, paths)
     }
 
     private static func environment(for binary: CodexBinary) -> [String: String] {
@@ -85,9 +104,12 @@ struct CodexClient {
         yield(.start)
         yield(.status("Reading project…"))
 
+        let images = writeImages(request.images)
+        defer { try? FileManager.default.removeItem(at: images.directory) }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: request.binary.executable)
-        process.arguments = arguments(for: request)
+        process.arguments = arguments(for: request, imagePaths: images.paths)
         var env = environment(for: request.binary)
         env["CODEX_API_KEY"] = request.apiKey
         process.environment = env

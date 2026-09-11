@@ -40,6 +40,21 @@ struct RootView: View {
                     session.infoConversationID = nil
                 }
             }
+            if let settingsID = session.projectSettingsID,
+               let project = session.projects.first(where: { $0.identifier == settingsID }) {
+                ProjectSettingsView(session: session, project: project) {
+                    session.projectSettingsID = nil
+                }
+            }
+            if session.newProjectPromptOpen {
+                NewProjectDialog(
+                    onCreate: { name in
+                        session.newProjectPromptOpen = false
+                        session.createProject(name: name)
+                    },
+                    onCancel: { session.newProjectPromptOpen = false }
+                )
+            }
             if let project = session.indexPrompt {
                 IndexProjectDialog(
                     project: project,
@@ -80,6 +95,14 @@ struct RootView: View {
                 }
                 if event.keyCode == 53, session.indexPrompt != nil {
                     session.skipProjectIndex()
+                    return nil
+                }
+                if event.keyCode == 53, session.newProjectPromptOpen {
+                    session.newProjectPromptOpen = false
+                    return nil
+                }
+                if event.keyCode == 53, session.projectSettingsID != nil {
+                    session.projectSettingsID = nil
                     return nil
                 }
                 if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "n" {

@@ -22,6 +22,13 @@ enum ComposerFieldMetrics {
 struct GrowingComposerField: NSViewRepresentable {
     @Binding var text: String
     var onSubmit: () -> Void
+    /// Files dropped onto or pasted into the field (Finder drag, ⌘V of a file).
+    var onFiles: ([URL]) -> Void = { _ in }
+    /// Raster image pasted from the clipboard.
+    var onImage: (NSImage) -> Void = { _ in }
+    /// First look at editing commands (arrows, Return, Tab, Escape); return true to consume one.
+    /// Lets the skill picker own navigation while the caret stays in the field.
+    var onCommand: (Selector) -> Bool = { _ in false }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text, onSubmit: onSubmit)
@@ -53,6 +60,9 @@ struct GrowingComposerField: NSViewRepresentable {
 
         let textView = ComposerTextView(frame: .zero, textContainer: container)
         textView.delegate = context.coordinator
+        textView.onFiles = onFiles
+        textView.onImage = onImage
+        textView.registerForDraggedTypes([.fileURL])
         textView.drawsBackground = false
         textView.isRichText = false
         textView.isEditable = true
@@ -92,7 +102,10 @@ struct GrowingComposerField: NSViewRepresentable {
     func updateNSView(_ scroll: ComposerScrollView, context: Context) {
         context.coordinator.text = $text
         context.coordinator.onSubmit = onSubmit
+        context.coordinator.onCommand = onCommand
         guard let textView = scroll.textView else { return }
+        textView.onFiles = onFiles
+        textView.onImage = onImage
         if textView.string != text {
             let editing = textView.window?.firstResponder === textView
             let selected = textView.selectedRanges
@@ -203,8 +216,47 @@ final class ComposerTextView: NSTextView {
         super.mouseDown(with: event)
     }
 
+    var onFiles: ([URL]) -> Void = { _ in }
+    var onImage: (NSImage) -> Void = { _ in }
+
+    /// Files and images on the pasteboard become attachments; anything else pastes as plain text.
     override func paste(_ sender: Any?) {
+        let pasteboard = NSPasteboard.general
+        let urls = Self.fileURLs(on: pasteboard)
+        if !urls.isEmpty {
+            onFiles(urls)
+            return
+        }
+        if pasteboard.string(forType: .string) == nil,
+           let image = pasteboard.readObjects(forClasses: [NSImage.self])?.first as? NSImage {
+            onImage(image)
+            return
+        }
         super.pasteAsPlainText(sender)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        Self.fileURLs(on: sender.draggingPasteboard).isEmpty ? super.draggingEntered(sender) : .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        Self.fileURLs(on: sender.draggingPasteboard).isEmpty ? super.draggingUpdated(sender) : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = Self.fileURLs(on: sender.draggingPasteboard)
+        guard !urls.isEmpty else { return super.performDragOperation(sender) }
+        onFiles(urls)
+        return true
+    }
+
+    private static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        let urls = (pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL]) ?? []
+        return urls.filter { url in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && !isDirectory.boolValue
+        }
     }
 }
 
@@ -212,6 +264,7 @@ extension GrowingComposerField {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
         var onSubmit: () -> Void
+        var onCommand: (Selector) -> Bool = { _ in false }
         weak var scrollView: ComposerScrollView?
 
         static let composerFont = NSFont.systemFont(ofSize: CueTheme.composerFontSize)
@@ -244,6 +297,7 @@ extension GrowingComposerField {
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if onCommand(commandSelector) { return true }
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
                     return false

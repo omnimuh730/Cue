@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// One in-flight assistant turn. Several can run at once, one per conversation.
 @MainActor
@@ -36,6 +37,7 @@ final class AppSession {
     let listen = ListenController()
     let remote = RemoteControlSession()
     let hotkeys = GlobalHotkeyCenter()
+    let skills = SkillLibrary()
     private let client = ResponsesClient()
     private let codex = CodexClient()
 
@@ -49,6 +51,8 @@ final class AppSession {
     var settingsOpen = false
     var searchOpen = false
     var previewAttachment: MessageAttachment?
+    /// Files still being read for the composer; each shows a placeholder chip.
+    private(set) var importingNames: [String] = []
     /// Conversation whose thread info sheet is open.
     var infoConversationID: UUID?
     var mermaidAsCode = false
@@ -65,6 +69,14 @@ final class AppSession {
     var indexPrompt: Project?
     var indexing = false
     var indexError: String?
+    /// Sidebar workspace filter: nil shows every chat, otherwise only that project's chats.
+    var selectedProjectID: UUID?
+    /// Project whose settings overlay (instructions, knowledge, folder) is open.
+    var projectSettingsID: UUID?
+    /// "New project" name prompt.
+    var newProjectPromptOpen = false
+    /// Knowledge files still being read for a project settings sheet.
+    private(set) var importingKnowledge: [String] = []
 
     private var requests: [UUID: ChatRequest] = [:]
     private var lastCaptionDraft = ""
@@ -80,6 +92,17 @@ final class AppSession {
     var activeProject: Project? {
         guard let conversation = activeConversation else { return nil }
         return project(for: conversation)
+    }
+
+    var selectedProject: Project? {
+        guard let selectedProjectID else { return nil }
+        return projects.first { $0.identifier == selectedProjectID }
+    }
+
+    /// Conversations shown in the sidebar for the selected workspace.
+    var visibleConversations: [Conversation] {
+        guard let selectedProjectID else { return conversations }
+        return conversations.filter { $0.projectID == selectedProjectID }
     }
 
     /// Full decoded turns; used for export and search, not for rendering (decoding attachments is slow).
@@ -201,12 +224,27 @@ final class AppSession {
 
     // MARK: - Conversations
 
+    /// New chat in the selected workspace (or Personal when no project is selected).
     func newChat() {
-        let conversation = Conversation(projectID: nil)
+        newChat(in: selectedProjectID)
+    }
+
+    func newChat(in projectID: UUID?) {
+        let conversation = Conversation(projectID: projectID)
         container.mainContext.insert(conversation)
         save()
         reloadConversations()
         select(conversation.identifier)
+    }
+
+    /// Switches the sidebar workspace and lands on that workspace's newest chat.
+    func selectWorkspace(_ projectID: UUID?) {
+        selectedProjectID = projectID
+        if let first = visibleConversations.first {
+            select(first.identifier)
+        } else {
+            newChat(in: projectID)
+        }
     }
 
     func select(_ conversationID: UUID) {
@@ -224,6 +262,28 @@ final class AppSession {
         draft = parked?.draft ?? ""
         attachments = parked?.attachments ?? []
         lastCaptionDraft = ""
+        refreshSkills()
+    }
+
+    // MARK: - Skills
+
+    /// Rescans skill folders for the active workspace; project chats add their repo's skills.
+    func refreshSkills() {
+        let folder = activeProject?.codeFolder
+        if skills.projectFolder != folder {
+            skills.reload(projectFolder: folder)
+        } else {
+            skills.reload()
+        }
+    }
+
+    /// Attaches the skill as a chip and clears the `/query` token so the user can type the request.
+    func attachSkill(_ skill: SkillDefinition) {
+        if let query = SkillInvocation.query(in: draft) {
+            draft = String(draft.dropFirst(query.count + 1)).trimmingCharacters(in: .whitespaces)
+        }
+        attachments.removeAll { $0.kind == .skill && $0.name == skill.name }
+        attachments.append(SkillInvocation.attachment(for: skill))
     }
 
     func deleteConversation(_ conversation: Conversation) {
@@ -254,12 +314,44 @@ final class AppSession {
         conversation.updatedAt = .now
         save()
         reloadConversations()
+        refreshSkills()
     }
 
-    func openProjectFolder() {
+    /// Creates an empty project (instructions and knowledge come later) and opens its settings.
+    @discardableResult
+    func createProject(name: String) -> Project {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let project = Project(name: trimmed.isEmpty ? "New project" : trimmed)
+        container.mainContext.insert(project)
+        save()
+        reloadProjects()
+        selectWorkspace(project.identifier)
+        projectSettingsID = project.identifier
+        return project
+    }
+
+    func renameProject(_ project: Project, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != project.name else { return }
+        project.name = trimmed
+        project.updatedAt = .now
+        save()
+        reloadProjects()
+    }
+
+    func setProjectInstructions(_ project: Project, _ text: String) {
+        let clipped = String(text.prefix(ProjectContext.maxInstructionCharacters))
+        project.instructions = clipped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : clipped
+        project.updatedAt = .now
+        save()
+    }
+
+    /// Picks a code folder and links it to the project; that project's chats then run through Codex.
+    func openProjectFolder(for project: Project? = nil) {
         let dialog = NSOpenPanel()
         dialog.title = "Open project folder"
-        dialog.message = "This chat will read the folder through Codex. Other chats stay as regular conversations."
+        dialog.message = project.map { "Chats in \($0.name) will read this folder through Codex." }
+            ?? "A new project will read this folder through Codex."
         dialog.canChooseDirectories = true
         dialog.canChooseFiles = false
         dialog.allowsMultipleSelection = false
@@ -269,22 +361,50 @@ final class AppSession {
         guard dialog.runModal() == .OK, let url = dialog.url else { return }
         do {
             let resolved = try ProjectPaths.usableDirectory(url.path)
-            let project = upsertProject(path: resolved, name: url.lastPathComponent)
-            if activeConversation == nil { newChat() }
-            guard let conversation = activeConversation else { return }
-            attachProject(project, to: conversation)
+            let target = project ?? upsertProject(path: resolved, name: url.lastPathComponent)
+            if target.folderPath != resolved {
+                target.folderPath = resolved
+                target.catalog = nil
+                target.catalogAt = nil
+                target.updatedAt = .now
+                // The Codex thread was rooted in the old folder; start fresh.
+                for conversation in conversations where conversation.projectID == target.identifier {
+                    conversation.codexThreadID = nil
+                }
+                save()
+                reloadProjects()
+                reloadConversations()
+            }
+            if selectedProjectID != target.identifier {
+                selectWorkspace(target.identifier)
+            }
+            refreshSkills()
             indexError = nil
             indexing = false
-            indexPrompt = project
+            indexPrompt = target
         } catch {
             remoteNotice = error.localizedDescription
         }
     }
 
+    func unlinkProjectFolder(_ project: Project) {
+        guard project.codeFolder != nil else { return }
+        project.folderPath = ""
+        project.catalog = nil
+        project.catalogAt = nil
+        project.updatedAt = .now
+        for conversation in conversations where conversation.projectID == project.identifier {
+            conversation.codexThreadID = nil
+        }
+        save()
+        reloadProjects()
+        reloadConversations()
+        refreshSkills()
+    }
+
     @discardableResult
     private func upsertProject(path: String, name: String) -> Project {
         if let existing = projects.first(where: { $0.folderPath == path }) {
-            existing.name = name.isEmpty ? existing.name : name
             existing.updatedAt = .now
             save()
             reloadProjects()
@@ -302,10 +422,71 @@ final class AppSession {
             conversation.projectID = nil
             conversation.codexThreadID = nil
         }
+        if selectedProjectID == project.identifier { selectedProjectID = nil }
+        if projectSettingsID == project.identifier { projectSettingsID = nil }
+        if indexPrompt?.identifier == project.identifier { indexPrompt = nil }
         container.mainContext.delete(project)
         save()
         reloadProjects()
         reloadConversations()
+        refreshSkills()
+    }
+
+    // MARK: Knowledge files
+
+    func pickKnowledgeFiles(for project: Project) {
+        let dialog = NSOpenPanel()
+        dialog.title = "Add knowledge"
+        dialog.message = "Documents added here are sent with every chat in \(project.name). PDFs are stored as extracted text."
+        dialog.canChooseDirectories = false
+        dialog.canChooseFiles = true
+        dialog.allowsMultipleSelection = true
+        dialog.allowedContentTypes = FileAttachmentImporter.allowedContentTypes.filter { !$0.conforms(to: .image) }
+        dialog.prompt = "Add"
+        NSApp.activate(ignoringOtherApps: true)
+        guard dialog.runModal() == .OK else { return }
+        addKnowledge(dialog.urls, to: project)
+    }
+
+    func addKnowledge(_ urls: [URL], to project: Project) {
+        let projectID = project.identifier
+        for url in urls {
+            let name = url.lastPathComponent
+            importingKnowledge.append(name)
+            Task { [weak self] in
+                let result = await Task.detached(priority: .userInitiated) { () -> Result<MessageAttachment, Error> in
+                    Result { try FileAttachmentImporter.load(url) }
+                }.value
+                guard let self else { return }
+                if let index = importingKnowledge.firstIndex(of: name) { importingKnowledge.remove(at: index) }
+                guard let target = projects.first(where: { $0.identifier == projectID }) else { return }
+                switch result {
+                case .success(let attachment):
+                    guard let entry = ProjectContext.knowledgeEntry(from: attachment) else {
+                        remoteNotice = "\(name) has no text to add as knowledge."
+                        return
+                    }
+                    var knowledge = target.knowledge.filter { $0.name != entry.name }
+                    let total = knowledge.reduce(0) { $0 + ($1.text?.count ?? 0) } + (entry.text?.count ?? 0)
+                    guard total <= ProjectContext.maxKnowledgeCharacters else {
+                        remoteNotice = "\(name) would push \(target.name)'s knowledge past its size limit."
+                        return
+                    }
+                    knowledge.append(entry)
+                    target.knowledge = knowledge
+                    target.updatedAt = .now
+                    save()
+                case .failure(let error):
+                    remoteNotice = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func removeKnowledge(_ attachmentID: String, from project: Project) {
+        project.knowledge = project.knowledge.filter { $0.id != attachmentID }
+        project.updatedAt = .now
+        save()
     }
 
     func skipProjectIndex() {
@@ -315,10 +496,9 @@ final class AppSession {
     }
 
     func confirmProjectIndex() {
-        guard let project = indexPrompt, !indexing else { return }
+        guard let project = indexPrompt, let root = project.codeFolder, !indexing else { return }
         indexing = true
         indexError = nil
-        let root = project.folderPath
         let projectID = project.identifier
         Task {
             let catalog = await Task.detached(priority: .userInitiated) { ProjectCatalog.build(root: root) }.value
@@ -418,7 +598,8 @@ final class AppSession {
         token: CancellationToken
     ) -> AsyncThrowingStream<ChatStreamEvent, Error> {
         let snapshot = settings
-        if let project = project(for: conversation) {
+        let project = project(for: conversation)
+        if let project, let folder = project.codeFolder {
             guard let binary = CodexBinaryLocator.resolve(override: snapshot.codexPath) else {
                 return AsyncThrowingStream { continuation in
                     continuation.yield(.error(CodexError.missingBinary.localizedDescription))
@@ -431,14 +612,16 @@ final class AppSession {
                 apiKey: apiKey,
                 model: snapshot.model,
                 effort: snapshot.reasoningEffort,
-                projectPath: project.folderPath,
+                projectPath: folder,
                 threadID: conversation.codexThreadID,
-                prompt: CodexPrompt.build(messages: messages, catalog: project.catalog)
+                prompt: CodexPrompt.build(messages: messages, catalog: project.catalog, project: project.context),
+                images: messages.last { $0.role == .user }?.attachments.filter(\.isImage) ?? []
             )
             return codex.stream(request, signal: token)
         }
         var continuation = ChatContinuationBuilder.build(from: history)
         continuation.promptCacheKey = "cue-\(conversation.identifier.uuidString.lowercased())"
+        continuation.project = project.map(\.context)
         return client.stream(apiKey: apiKey, settings: snapshot, continuation: continuation, signal: token)
     }
 
@@ -558,6 +741,70 @@ final class AppSession {
             attachments.append(MessageAttachment(id: UUID().uuidString, mimeType: shot.mimeType, name: shot.name, dataURL: shot.dataURL))
         } catch {
             remoteNotice = error.localizedDescription
+        }
+    }
+
+    // MARK: - File attachments
+
+    /// Opens the file picker and attaches the chosen documents, images, or text files.
+    func pickFiles() {
+        let dialog = NSOpenPanel()
+        dialog.title = "Attach files"
+        dialog.message = "PDF, Word, Excel, PowerPoint, images, Markdown, and other text files."
+        dialog.canChooseDirectories = false
+        dialog.canChooseFiles = true
+        dialog.allowsMultipleSelection = true
+        dialog.allowedContentTypes = FileAttachmentImporter.allowedContentTypes
+        dialog.prompt = "Attach"
+        NSApp.activate(ignoringOtherApps: true)
+        guard dialog.runModal() == .OK else { return }
+        importFiles(dialog.urls)
+    }
+
+    /// Reads files off the main actor and appends them to the composer as they finish.
+    func importFiles(_ urls: [URL]) {
+        let targetID = activeID
+        for url in urls {
+            let name = url.lastPathComponent
+            importingNames.append(name)
+            Task { [weak self] in
+                let result = await Task.detached(priority: .userInitiated) { () -> Result<MessageAttachment, Error> in
+                    Result { try FileAttachmentImporter.load(url) }
+                }.value
+                guard let self else { return }
+                if let index = importingNames.firstIndex(of: name) { importingNames.remove(at: index) }
+                switch result {
+                case .success(let attachment):
+                    addAttachment(attachment, to: targetID)
+                case .failure(let error):
+                    remoteNotice = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func addPastedImage(_ image: NSImage) {
+        guard let dataURL = ImageAttachmentEncoder.jpegDataURL(image, maxDimension: FileAttachmentImporter.maxImageDimension) else { return }
+        attachments.append(MessageAttachment(
+            mimeType: "image/jpeg",
+            name: "paste-\(Int(Date().timeIntervalSince1970)).jpg",
+            dataURL: dataURL
+        ))
+    }
+
+    /// Lands an attachment in the conversation it was picked for, even if the user switched chats meanwhile.
+    private func addAttachment(_ attachment: MessageAttachment, to conversationID: UUID?) {
+        let existing = conversationID == activeID ? attachments : (conversationID.flatMap { parkedDrafts[$0]?.attachments } ?? [])
+        let budget = existing.reduce(0) { $0 + ($1.promptText?.count ?? 0) } + (attachment.promptText?.count ?? 0)
+        guard budget <= FileAttachmentImporter.maxMessageTextCharacters else {
+            remoteNotice = "\(attachment.name) would push this message past the attachment text limit."
+            return
+        }
+        if conversationID == activeID || conversationID == nil {
+            attachments.append(attachment)
+        } else if let conversationID {
+            let parked = parkedDrafts[conversationID] ?? ("", [])
+            parkedDrafts[conversationID] = (parked.draft, parked.attachments + [attachment])
         }
     }
 

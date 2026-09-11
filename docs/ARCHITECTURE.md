@@ -34,9 +34,23 @@ Mermaid renders in a `WKWebView` once the turn completes (source while streaming
 
 There is no title bar: the sidebar row's info button opens `ThreadInfoView` (cost, tokens with prompt-cache share, latency, per-reply breakdown). Personal turns send a per-thread `prompt_cache_key` so OpenAI serves the shared prefix from cache.
 
-## Projects (Code mode)
+## Attachments
 
-A project is a local folder opened from the sidebar workspace switcher. Conversations carry `projectID`; turns in a project workspace spawn `codex exec --experimental-json --sandbox read-only --cd <folder> --skip-git-repo-check` with `CODEX_API_KEY` from the Keychain, write the newest user message to stdin, and map the JSONL thread events onto `ChatStreamEvent` (`CodexEventMapper`). The thread id from `thread.started` is stored on the conversation and passed as `resume <id>` on follow-ups. Optional indexing builds a map catalog (`ProjectCatalog`) that is prepended to the prompt.
+`MessageAttachment` carries a `kind`: `image` (JPEG data URL), `pdf` (data URL plus PDFKit text), `document` (Office / RTF reduced to text), `text` (file contents), or `skill`. `FileAttachmentImporter` turns a URL into one off the main actor using only Apple frameworks: PDFKit, AppKit's text importers for `.doc` / `.rtf` / `.odt`, and `OOXMLArchive` — a small ZIP reader on the Compression framework — with `XMLParser` walkers (`OOXMLText`) for `.docx` paragraphs and tables, `.xlsx` sheets as Markdown tables, and `.pptx` slides with notes. Text is capped per file and per message; the flag survives on the attachment so the UI can say so. Files arrive through the composer's paperclip, a Finder drop on the field, or ⌘V of a file URL (`ComposerTextView`).
+
+`AttachmentPrompt` renders every non-image attachment as text shared by both backends. The Responses client sends images as `input_image`, PDFs natively as `input_file`, and the rest as an `input_text` part ahead of the user's words; Codex gets the same text (PDF text included) in the prompt and images by path via `--image`.
+
+## Skills
+
+A skill is Markdown in `~/.cue/skills/` (`name.md` or `name/SKILL.md`, optional front matter with `name:` / `description:`); a project with a code folder also contributes `.cue/skills` and `.claude/skills` from that folder, overriding global names. `SkillCatalog` loads and parses; `SkillLibrary` (MainActor) keeps the list current with a vnode source on the global folder and reloads when the workspace changes. Typing `/` at the start of the draft opens `SkillPickerPanel` above the composer; the field forwards arrows / Return / Tab / Escape to it. Picking a skill attaches it as a `.skill` chip with the body captured at that moment, so history stays stable if the file changes later.
+
+## Projects
+
+A `Project` is a workspace: name, optional instructions, knowledge files, and grouped chats. Knowledge is `[MessageAttachment]` with payloads stripped (PDFs keep their extracted text), built with the same importer. `ProjectContext.promptBlock()` renders instructions and knowledge; personal chats append it to the Responses `instructions` on every turn (the API does not carry instructions across `previous_response_id`; `prompt_cache_key` keeps the repeated prefix cheap), and Codex chats get it at the top of the prompt. The sidebar's Projects section filters chats by `selectedProjectID` and new chats land in the selected workspace; `ProjectSettingsView` edits everything in place.
+
+### Code mode
+
+Linking a code folder to a project switches its chats to Codex. Conversations carry `projectID`; turns in a folder-linked project spawn `codex exec --experimental-json --sandbox read-only --cd <folder> --skip-git-repo-check` with `CODEX_API_KEY` from the Keychain, write the newest user message to stdin, and map the JSONL thread events onto `ChatStreamEvent` (`CodexEventMapper`). The thread id from `thread.started` is stored on the conversation and passed as `resume <id>` on follow-ups. Optional indexing builds a map catalog (`ProjectCatalog`) that is prepended to the prompt.
 
 `CodexBinaryLocator` finds the CLI: the Settings override, a bundled auxiliary executable, PATH and common prefixes, global npm packages (unwrapping the JS shim to the vendored Mach-O), then the copy inside Halo.app. `ProjectPaths` refuses filesystem roots and OS directories as a working directory.
 

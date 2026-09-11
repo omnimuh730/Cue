@@ -170,6 +170,8 @@ nonisolated struct ChatContinuation: Equatable, Sendable {
     var inputMessages: [ChatRequestMessage]?
     /// Stable per-thread key so OpenAI routes every turn to the same prompt-cache shard.
     var promptCacheKey: String? = nil
+    /// Instructions and knowledge of the project this thread belongs to, if any.
+    var project: ProjectContext? = nil
 }
 
 nonisolated enum ChatError: LocalizedError {

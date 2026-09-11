@@ -48,19 +48,25 @@ struct ChatView: View {
             Text("Cue")
                 .font(.system(size: 27, weight: .medium))
             if let project = session.activeProject {
-                Text("Cue will read **\(project.name)** with Codex and answer from that codebase.")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Text(project.catalog == nil ? "Not indexed — Codex explores the tree on demand." : "Indexed \(project.catalogAt.map { $0.formatted(.relative(presentation: .named)) } ?? "")")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            } else {
-                Text("Ask anything. Listen, capture, and stay out of the way.")
-                    .foregroundStyle(.secondary)
+                if project.codeFolder != nil {
+                    Text("Cue will read **\(project.name)** with Codex and answer from that codebase.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Text(project.catalog == nil ? "Not indexed — Codex explores the tree on demand." : "Indexed \(project.catalogAt.map { $0.formatted(.relative(presentation: .named)) } ?? "")")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text("New chat in **\(project.name)**.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Text(projectSummary(project))
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
                 Button {
-                    session.openProjectFolder()
+                    session.projectSettingsID = project.identifier
                 } label: {
-                    Label("Load project", systemImage: "folder.badge.plus")
+                    Label("Project settings", systemImage: "slider.horizontal.3")
                         .font(.system(size: 13, weight: .medium))
                         .padding(.horizontal, 14)
                         .frame(height: 32)
@@ -69,11 +75,49 @@ struct ChatView: View {
                 .buttonStyle(.plain)
                 .cueGlass(cornerRadius: 16, interactive: true)
                 .padding(.top, CueTheme.Spacing.xs)
-                .help("Chat about a local codebase through the Codex CLI")
+            } else {
+                Text("Ask anything. Attach files, type / for a skill, or start a project.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                HStack(spacing: 8) {
+                    Button {
+                        session.newProjectPromptOpen = true
+                    } label: {
+                        Label("New project", systemImage: "folder.badge.plus")
+                            .font(.system(size: 13, weight: .medium))
+                            .padding(.horizontal, 14)
+                            .frame(height: 32)
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .cueGlass(cornerRadius: 16, interactive: true)
+                    .help("Group chats with shared instructions and knowledge files")
+                    Button {
+                        session.openProjectFolder()
+                    } label: {
+                        Label("Open code folder", systemImage: "chevron.left.forwardslash.chevron.right")
+                            .font(.system(size: 13, weight: .medium))
+                            .padding(.horizontal, 14)
+                            .frame(height: 32)
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .cueGlass(cornerRadius: 16, interactive: true)
+                    .help("Chat about a local codebase through the Codex CLI")
+                }
+                .padding(.top, CueTheme.Spacing.xs)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 80)
+    }
+
+    private func projectSummary(_ project: Project) -> String {
+        var parts: [String] = []
+        if !(project.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { parts.append("custom instructions") }
+        let files = project.knowledge.count
+        if files > 0 { parts.append(files == 1 ? "1 knowledge file" : "\(files) knowledge files") }
+        return parts.isEmpty ? "No instructions or knowledge yet — add them in project settings." : "Uses " + parts.joined(separator: " and ") + "."
     }
 }
 
@@ -96,19 +140,21 @@ struct MessageBubble: View {
             VStack(alignment: role == .user ? .trailing : .leading, spacing: 8) {
                 if !attachments.isEmpty {
                     ForEach(attachments) { attachment in
-                        if let image = AttachmentImage.nsImage(from: attachment) {
-                            Button {
-                                onPreview(attachment)
-                            } label: {
+                        Button {
+                            onPreview(attachment)
+                        } label: {
+                            if let image = AttachmentImage.nsImage(from: attachment) {
                                 Image(nsImage: image)
                                     .resizable()
                                     .scaledToFit()
                                     .frame(maxHeight: 180)
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            } else {
+                                DocumentChipLabel(attachment: attachment)
                             }
-                            .buttonStyle(.plain)
-                            .help("View \(attachment.name)")
                         }
+                        .buttonStyle(.plain)
+                        .help("View \(attachment.name)")
                     }
                 }
                 if role == .user {

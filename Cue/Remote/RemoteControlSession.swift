@@ -259,14 +259,11 @@ final class RemoteControlSession {
     private func paste() {
         let pasteboard = NSPasteboard.general
         if let image = pasteboard.readObjects(forClasses: [NSImage.self])?.first as? NSImage,
-           let tiff = image.tiffRepresentation,
-           let bitmap = NSBitmapImageRep(data: tiff),
-           let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.82]) {
+           let dataURL = ImageAttachmentEncoder.jpegDataURL(image) {
             onImage?(MessageAttachment(
-                id: UUID().uuidString,
                 mimeType: "image/jpeg",
                 name: "paste-\(Int(Date().timeIntervalSince1970)).jpg",
-                dataURL: "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+                dataURL: dataURL
             ))
         } else if let text = pasteboard.string(forType: .string), !text.isEmpty {
             onText?(text)

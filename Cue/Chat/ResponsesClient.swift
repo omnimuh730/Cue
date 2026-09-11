@@ -157,7 +157,7 @@ struct ResponsesClient {
     ) async throws {
         var body: [String: Any] = [
             "model": settings.model.rawValue,
-            "instructions": SystemInstruction.buildResponseInstructions(settings.systemInstruction, webSearchEnabled: settings.webSearchEnabled),
+            "instructions": SystemInstruction.buildResponseInstructions(settings.systemInstruction, webSearchEnabled: settings.webSearchEnabled, project: continuation.project),
             "input": toResponseInput(useChain ? (continuation.inputMessages ?? continuation.messages) : continuation.messages),
             "reasoning": ["effort": settings.reasoningEffort.rawValue],
             "store": true,
@@ -214,21 +214,37 @@ struct ResponsesClient {
         }
     }
 
-    private func toResponseInput(_ messages: [ChatRequestMessage]) -> [[String: Any]] {
+    /// Images and PDFs go to the model natively; documents, text files, and skills are rendered as
+    /// an `input_text` part ahead of the user's own words.
+    func toResponseInput(_ messages: [ChatRequestMessage]) -> [[String: Any]] {
         messages.map { message in
             if message.role == .assistant || message.attachments.isEmpty {
                 return ["role": message.role.rawValue, "content": message.content]
             }
             var content: [[String: Any]] = []
-            if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                content.append(["type": "input_text", "text": message.content])
+            if let context = AttachmentPrompt.text(for: message.attachments, includePDFText: false) {
+                content.append(["type": "input_text", "text": context])
             }
             for attachment in message.attachments {
-                content.append([
-                    "type": "input_image",
-                    "image_url": attachment.dataURL,
-                    "detail": "auto"
-                ])
+                switch attachment.kind {
+                case .image:
+                    content.append([
+                        "type": "input_image",
+                        "image_url": attachment.dataURL,
+                        "detail": "auto"
+                    ])
+                case .pdf:
+                    content.append([
+                        "type": "input_file",
+                        "filename": attachment.name,
+                        "file_data": attachment.dataURL
+                    ])
+                case .document, .text, .skill:
+                    continue
+                }
+            }
+            if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                content.append(["type": "input_text", "text": message.content])
             }
             if content.isEmpty {
                 content.append(["type": "input_text", "text": ""])
