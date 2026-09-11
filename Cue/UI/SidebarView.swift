@@ -56,23 +56,12 @@ struct SidebarView: View {
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 6)
-        .padding(.top, 32)
+        .padding(.top, 8)
         .background { CueWindowDragSource() }
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            Button {
-                session.sidebarOpen = false
-            } label: {
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Hide sidebar")
-
             Text("Cue")
                 .font(.system(size: 15, weight: .semibold))
                 .allowsHitTesting(false)

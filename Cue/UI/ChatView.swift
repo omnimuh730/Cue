@@ -130,6 +130,9 @@ struct MessageBubble: View {
     var activity: String? = nil
     var onPreview: (MessageAttachment) -> Void
 
+    @State private var hovering = false
+    @State private var copied = false
+
     private var role: MessageRole { message.role }
     private var status: MessageStatus? { message.status }
     private var attachments: [MessageAttachment] { message.attachments }
@@ -158,11 +161,11 @@ struct MessageBubble: View {
                     }
                 }
                 if role == .user {
-                    Text(message.content)
-                        .font(.system(size: 15, weight: .regular))
+                    SelectableTextView(text: MarkdownTextBuilder.plain(message.content))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    copyRow
                 } else {
                     if status == .streaming, message.content.isEmpty {
                         HStack(spacing: 8) {
@@ -191,14 +194,47 @@ struct MessageBubble: View {
                         Text("▍")
                             .foregroundStyle(.secondary)
                     }
-                    if let cost = message.costUsd, let timing = message.timing {
-                        Text("\(Pricing.formatUsd(cost)) · \(Pricing.formatLatencyPair(timeToFirstTokenMs: timing.timeToFirstTokenMs, totalMs: timing.totalMs))")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                    if status != .streaming {
+                        HStack(spacing: 10) {
+                            if let cost = message.costUsd, let timing = message.timing {
+                                Text("\(Pricing.formatUsd(cost)) · \(Pricing.formatLatencyPair(timeToFirstTokenMs: timing.timeToFirstTokenMs, totalMs: timing.totalMs))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            copyRow
+                        }
                     }
                 }
             }
             if role != .user { Spacer(minLength: 24) }
         }
+        .background { HoverRegion { hovering = $0 } }
+    }
+
+    /// Copies the message as plain text. Revealed on hover so the reading column stays quiet.
+    private var copyRow: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(message.content, forType: .string)
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.4))
+                copied = false
+            }
+        } label: {
+            Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 11, weight: .medium))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(copied ? Color.green : Color.secondary)
+                .padding(.horizontal, 7)
+                .frame(height: 22)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .background(Color.primary.opacity(hovering ? 0.06 : 0), in: Capsule())
+        .opacity(hovering || copied ? 1 : 0)
+        .animation(.easeInOut(duration: 0.15), value: hovering || copied)
+        .help("Copy message text")
+        .accessibilityLabel("Copy message")
     }
 }

@@ -12,16 +12,26 @@ struct RootView: View {
                         .frame(width: CueTheme.sidebarWidth)
                         .cueGlass(cornerRadius: 18, interactive: true)
                         .padding(.leading, CueTheme.sidebarInset)
-                        .padding(.vertical, CueTheme.sidebarInset)
+                        .padding(.top, CueTheme.headerHeight + CueTheme.sidebarInset)
+                        .padding(.bottom, CueTheme.sidebarInset)
                         .padding(.trailing, 4)
                 }
                 VStack(spacing: 0) {
                     ChatView(session: session)
+                        // Reserve the toolbar band; the bar itself is drawn window-wide below so
+                        // scrolled content passes beneath the glass.
+                        .safeAreaInset(edge: .top, spacing: 0) {
+                            Color.clear.frame(height: CueTheme.headerHeight)
+                        }
                     ComposerView(session: session)
                         .padding(.horizontal, CueTheme.composerInset)
                         .padding(.bottom, CueTheme.composerInset)
                 }
-                .overlay(alignment: .top) { ChatTopStrip(session: session) }
+            }
+            .ignoresSafeArea(edges: .top)
+            .overlay(alignment: .top) {
+                ChatToolbar(session: session)
+                    .ignoresSafeArea(edges: .top)
             }
             if session.settingsOpen {
                 SettingsView(session: session)

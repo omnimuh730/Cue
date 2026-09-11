@@ -98,12 +98,18 @@ struct MermaidSourceView: View {
     var source: String
 
     var body: some View {
-        Text(source)
-            .font(.system(.body, design: .monospaced))
-            .textSelection(.enabled)
+        SelectableTextView(text: MarkdownTextBuilder.plain(source, size: 13).monospaced())
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private extension NSAttributedString {
+    func monospaced() -> NSAttributedString {
+        let copy = NSMutableAttributedString(attributedString: self)
+        copy.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: MarkdownTextBuilder.codeSize, weight: .regular), range: NSRange(location: 0, length: copy.length))
+        return copy
     }
 }
 
