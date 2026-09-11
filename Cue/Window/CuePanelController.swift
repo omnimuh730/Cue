@@ -28,7 +28,7 @@ final class CuePanelController: NSObject, NSWindowDelegate {
         panel.hasShadow = true
         panel.minSize = NSSize(width: WindowBounds.minWidth, height: WindowBounds.minHeight)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false
         panel.contentView = hosting
         hosting.frame = panel.contentView?.bounds ?? .zero
         hosting.autoresizingMask = [.width, .height]

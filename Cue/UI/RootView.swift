@@ -10,7 +10,10 @@ struct RootView: View {
                 if session.sidebarOpen {
                     SidebarView(session: session)
                         .frame(width: CueTheme.sidebarWidth)
-                        .cueGlass(cornerRadius: 0)
+                        .cueGlass(cornerRadius: 18, interactive: true)
+                        .padding(.leading, CueTheme.sidebarInset)
+                        .padding(.vertical, CueTheme.sidebarInset)
+                        .padding(.trailing, 4)
                 }
                 VStack(spacing: 0) {
                     HeaderView(session: session)

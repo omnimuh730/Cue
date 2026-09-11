@@ -47,28 +47,7 @@ struct ResponsesClient {
     ) async throws {
         yield(.start)
         let startedAt = Date()
-        var firstTokenAt: Date?
-        var webSearchCalls = 0
-        var responseID: String?
-        var emittedUsage = false
-
-        func emitUsage(from json: [String: Any]) {
-            guard !emittedUsage else { return }
-            if let id = json["id"] as? String, !id.isEmpty { responseID = id }
-            guard let usage = readUsage(json["usage"]) else { return }
-            if usage.inputTokens == 0, usage.outputTokens == 0, webSearchCalls == 0 { return }
-            emittedUsage = true
-            let calls = max(webSearchCalls, countWebSearchCalls(json["output"]))
-            let estimate = Pricing.estimateTurnCost(model: settings.model, usage: usage, webSearchCalls: calls)
-            yield(.usage(
-                usage,
-                costUsd: estimate.costUsd,
-                model: settings.model,
-                effort: settings.reasoningEffort,
-                webSearchCalls: calls,
-                breakdown: estimate.breakdown
-            ))
-        }
+        let state = ResponseStreamState()
 
         let canChain = continuation.previousResponseID != nil && !(continuation.inputMessages ?? []).isEmpty
         do {
@@ -79,15 +58,7 @@ struct ResponsesClient {
                 useChain: canChain,
                 signal: signal,
                 onEvent: { type, payload in
-                    handle(
-                        type: type,
-                        payload: payload,
-                        firstTokenAt: &firstTokenAt,
-                        responseID: &responseID,
-                        webSearchCalls: &webSearchCalls,
-                        emitUsage: emitUsage,
-                        yield: yield
-                    )
+                    handle(type: type, payload: payload, settings: settings, state: state, yield: yield)
                 }
             )
         } catch let error as ChatError {
@@ -99,15 +70,7 @@ struct ResponsesClient {
                     useChain: false,
                     signal: signal,
                     onEvent: { type, payload in
-                        handle(
-                            type: type,
-                            payload: payload,
-                            firstTokenAt: &firstTokenAt,
-                            responseID: &responseID,
-                            webSearchCalls: &webSearchCalls,
-                            emitUsage: emitUsage,
-                            yield: yield
-                        )
+                        handle(type: type, payload: payload, settings: settings, state: state, yield: yield)
                     }
                 )
             } else {
@@ -118,35 +81,33 @@ struct ResponsesClient {
         let finishedAt = Date()
         yield(.done(
             timing: ResponseTiming(
-                timeToFirstTokenMs: max(0, ((firstTokenAt ?? finishedAt).timeIntervalSince(startedAt)) * 1000),
+                timeToFirstTokenMs: max(0, ((state.firstTokenAt ?? finishedAt).timeIntervalSince(startedAt)) * 1000),
                 totalMs: max(0, finishedAt.timeIntervalSince(startedAt) * 1000)
             ),
-            responseID: responseID
+            responseID: state.responseID
         ))
     }
 
-    private func handle(
+    func handle(
         type: String,
         payload: [String: Any],
-        firstTokenAt: inout Date?,
-        responseID: inout String?,
-        webSearchCalls: inout Int,
-        emitUsage: ([String: Any]) -> Void,
+        settings: PublicSettings,
+        state: ResponseStreamState,
         yield: (ChatStreamEvent) -> Void
     ) {
         switch type {
         case "response.created":
             if let response = payload["response"] as? [String: Any], let id = response["id"] as? String {
-                responseID = id
+                state.responseID = id
             }
         case "response.output_text.delta":
-            if firstTokenAt == nil { firstTokenAt = Date() }
+            if state.firstTokenAt == nil { state.firstTokenAt = Date() }
             if let delta = payload["delta"] as? String { yield(.delta(delta)) }
         case "response.web_search_call.completed":
-            webSearchCalls += 1
+            state.webSearchCalls += 1
         case "response.completed", "response.incomplete":
             if let response = payload["response"] as? [String: Any] {
-                emitUsage(response)
+                emitUsage(from: response, settings: settings, state: state, yield: yield)
             }
         case "response.failed":
             let message = ((payload["response"] as? [String: Any])?["error"] as? [String: Any])?["message"] as? String
@@ -155,9 +116,32 @@ struct ResponsesClient {
             yield(.error((payload["message"] as? String) ?? "Something went wrong while contacting OpenAI."))
         default:
             if let response = payload["response"] as? [String: Any], response["usage"] != nil {
-                emitUsage(response)
+                emitUsage(from: response, settings: settings, state: state, yield: yield)
             }
         }
+    }
+
+    private func emitUsage(
+        from json: [String: Any],
+        settings: PublicSettings,
+        state: ResponseStreamState,
+        yield: (ChatStreamEvent) -> Void
+    ) {
+        guard !state.emittedUsage else { return }
+        if let id = json["id"] as? String, !id.isEmpty { state.responseID = id }
+        guard let usage = readUsage(json["usage"]) else { return }
+        if usage.inputTokens == 0, usage.outputTokens == 0, state.webSearchCalls == 0 { return }
+        state.emittedUsage = true
+        let calls = max(state.webSearchCalls, countWebSearchCalls(json["output"]))
+        let estimate = Pricing.estimateTurnCost(model: settings.model, usage: usage, webSearchCalls: calls)
+        yield(.usage(
+            usage,
+            costUsd: estimate.costUsd,
+            model: settings.model,
+            effort: settings.reasoningEffort,
+            webSearchCalls: calls,
+            breakdown: estimate.breakdown
+        ))
     }
 
     private func streamOnce(
@@ -281,6 +265,13 @@ struct ResponsesClient {
         }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+}
+
+final class ResponseStreamState {
+    var firstTokenAt: Date?
+    var webSearchCalls = 0
+    var responseID: String?
+    var emittedUsage = false
 }
 
 final class CancellationToken: @unchecked Sendable {

@@ -5,11 +5,20 @@ enum CueTheme {
     static let symbolName = "circle.dashed.inset.filled"
     static let sidebarWidth: CGFloat = 282
     static let headerHeight: CGFloat = 44
+    static let trafficClearance: CGFloat = 78
+    static let sidebarInset: CGFloat = 8
     static let readingColumnMax: CGFloat = 800
     static let radiusRow: CGFloat = 8
     static let radiusPanel: CGFloat = 16
     static let radiusComposer: CGFloat = 28
     static let composerInset: CGFloat = 18
+    static let composerFontSize: CGFloat = 15.5
+    static let composerLineHeight: CGFloat = 23
+    static let composerMinLines = 1
+    static let composerMaxLines = 10
+
+    static var composerMinHeight: CGFloat { composerLineHeight * CGFloat(composerMinLines) }
+    static var composerMaxHeight: CGFloat { composerLineHeight * CGFloat(composerMaxLines) }
 
     enum Spacing {
         static let xxs: CGFloat = 4

@@ -28,7 +28,8 @@ struct ChatView: View {
                 .frame(maxWidth: CueTheme.readingColumnMax)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, CueTheme.Spacing.lg)
-                .padding(.vertical, CueTheme.Spacing.lg)
+                .padding(.top, CueTheme.Spacing.md)
+                .padding(.bottom, CueTheme.Spacing.lg)
             }
             .onChange(of: session.activeTurns.last?.content) { _, _ in
                 if let id = session.activeTurns.last?.id {

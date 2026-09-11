@@ -3,13 +3,13 @@ import SwiftUI
 
 struct ComposerView: View {
     @Bindable var session: AppSession
-    @State private var pickerOpen = false
+    @State private var fieldHeight = CueTheme.composerMinHeight
 
     var body: some View {
         VStack(alignment: .leading, spacing: CueTheme.Spacing.xs) {
             if !session.attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
+                    HStack(spacing: 8) {
                         ForEach(session.attachments) { attachment in
                             if let data = Data(base64Encoded: attachment.dataURL.components(separatedBy: ",").last ?? ""),
                                let image = NSImage(data: data) {
@@ -23,24 +23,31 @@ struct ComposerView: View {
                     }
                 }
             }
-            TextEditor(text: $session.draft)
-                .font(.system(size: 15))
-                .frame(minHeight: 44, maxHeight: 140)
-                .scrollContentBackground(.hidden)
+            ZStack(alignment: .topLeading) {
+                if session.draft.isEmpty {
+                    Text("Ask anything")
+                        .font(.system(size: CueTheme.composerFontSize))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                        .allowsHitTesting(false)
+                }
+                GrowingComposerField(
+                    text: $session.draft,
+                    height: $fieldHeight,
+                    onSubmit: { session.send() }
+                )
+                .frame(height: fieldHeight)
+            }
             HStack(spacing: CueTheme.Spacing.xs) {
                 listenButton
                 listenPill
                 Spacer()
-                ModelPicker(settings: session.settings) { model, effort in
-                    session.settingsStore.patch { settings in
-                        settings.model = model
-                        settings.reasoningEffort = effort
-                    }
-                }
+                ModelPicker(session: session)
                 Button {
                     session.send()
                 } label: {
                     Image(systemName: session.isStreaming ? "stop.fill" : "arrow.up")
+                        .font(.system(size: 13, weight: .bold))
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.plain)
@@ -49,14 +56,13 @@ struct ComposerView: View {
                 .help(session.isStreaming ? "Stop" : "Send")
             }
         }
-        .padding(CueTheme.Spacing.md)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
         .cueGlass(cornerRadius: CueTheme.radiusComposer, interactive: true)
         .shadow(color: .black.opacity(0.18), radius: 24, y: 8)
         .frame(maxWidth: CueTheme.readingColumnMax)
         .frame(maxWidth: .infinity)
-        .onSubmit(of: .text) {
-            session.send()
-        }
     }
 
     private var listenButton: some View {
@@ -64,6 +70,7 @@ struct ComposerView: View {
             Task { await session.listen.toggleArmed(settings: session.settings) }
         } label: {
             Image(systemName: session.listen.status.armed ? "waveform.badge.mic" : "waveform")
+                .frame(width: 28, height: 28)
         }
         .buttonStyle(.plain)
         .help("Arm listen")

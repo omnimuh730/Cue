@@ -38,6 +38,13 @@ struct CueTests {
         #expect(ModelCatalog.normalizeEffort(.low, for: .sol) == .low)
     }
 
+    @Test func catalogGroupsPreserveOrder() {
+        let groups = ModelCatalog.groupedModels
+        #expect(groups.map(\.group) == ["GPT-5.6", "GPT-5.4"])
+        #expect(groups[0].models.map(\.id) == [.sol, .terra, .luna])
+        #expect(groups[1].models.map(\.id) == [.mini])
+    }
+
     @Test func pricingUsesMiniRates() {
         let usage = TokenUsage(inputTokens: 1_000_000, outputTokens: 1_000_000, cachedInputTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0)
         let estimate = Pricing.estimateTurnCost(model: .mini, usage: usage, webSearchCalls: 1)
@@ -109,5 +116,36 @@ struct CueTests {
             return false
         }
         #expect(started)
+    }
+
+    @Test @MainActor func streamUsageEventDoesNotHitExclusivityTrap() {
+        let client = ResponsesClient()
+        let state = ResponseStreamState()
+        var events: [ChatStreamEvent] = []
+        client.handle(
+            type: "response.created",
+            payload: ["response": ["id": "resp_1"]],
+            settings: .default,
+            state: state,
+            yield: { events.append($0) }
+        )
+        client.handle(
+            type: "response.completed",
+            payload: [
+                "response": [
+                    "id": "resp_1",
+                    "usage": [
+                        "input_tokens": 12,
+                        "output_tokens": 8
+                    ]
+                ]
+            ],
+            settings: .default,
+            state: state,
+            yield: { events.append($0) }
+        )
+        #expect(state.responseID == "resp_1")
+        #expect(state.emittedUsage)
+        #expect(events.count == 1)
     }
 }

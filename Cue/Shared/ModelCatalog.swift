@@ -87,6 +87,18 @@ nonisolated enum ModelCatalog {
     static let `default`: ModelID = .sol
     static let defaultEffort: ReasoningEffort = .low
 
+    static var groupedModels: [(group: String, models: [ModelDefinition])] {
+        var groups: [(String, [ModelDefinition])] = []
+        for model in models {
+            if let last = groups.last, last.0 == model.group {
+                groups[groups.count - 1].1.append(model)
+            } else {
+                groups.append((model.group, [model]))
+            }
+        }
+        return groups.map { (group: $0.0, models: $0.1) }
+    }
+
     static func definition(for id: ModelID) -> ModelDefinition {
         models.first { $0.id == id } ?? models[0]
     }
