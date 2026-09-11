@@ -10,6 +10,8 @@ struct ChatView: View {
                 LazyVStack(alignment: .leading, spacing: 28) {
                     if session.activeTurns.isEmpty {
                         VStack(spacing: CueTheme.Spacing.sm) {
+                            CueMark(pointSize: 36)
+                                .padding(.bottom, CueTheme.Spacing.xs)
                             Text("Cue")
                                 .font(.system(size: 27, weight: .medium))
                             Text("Ask anything. Listen, capture, and stay out of the way.")

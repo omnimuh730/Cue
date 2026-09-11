@@ -85,9 +85,9 @@ struct PublicSettings: Codable, Equatable, Sendable {
         hotkeys = Dictionary(uniqueKeysWithValues: HotkeyCatalog.normalize(map).map { ($0.key.rawValue, $0.value) })
     }
 
-    var hasAPIKey: Bool { KeychainAPIKeyStore.load() != nil }
+    var hasAPIKey: Bool { APIKeyStore.load() != nil }
 
-    var keyHint: String? { KeychainAPIKeyStore.hint(for: KeychainAPIKeyStore.load()) }
+    var keyHint: String? { APIKeyStore.hint() }
 }
 
 @MainActor
@@ -115,9 +115,9 @@ final class SettingsStore {
         next.windowOpacity = min(1, max(0.15, next.windowOpacity))
         next.setHotkeys(next.hotkeyMap)
         if clearAPIKey {
-            KeychainAPIKeyStore.delete()
+            APIKeyStore.delete()
         } else if let apiKey {
-            try KeychainAPIKeyStore.save(apiKey)
+            try APIKeyStore.save(apiKey)
         }
         settings = next
         persist()

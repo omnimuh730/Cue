@@ -1,6 +1,8 @@
+import AppKit
 import SwiftUI
 
 enum CueTheme {
+    static let symbolName = "circle.dashed.inset.filled"
     static let sidebarWidth: CGFloat = 282
     static let headerHeight: CGFloat = 44
     static let readingColumnMax: CGFloat = 800
@@ -28,15 +30,24 @@ struct CueGlassModifier: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if reduceTransparency {
             content
-                .background(Color(nsColor: .windowBackgroundColor), in: shape)
-                .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+                .background(Color(nsColor: .windowBackgroundColor).opacity(0.92), in: shape)
+                .overlay(shape.strokeBorder(.white.opacity(0.14), lineWidth: 1))
         } else {
             content
                 .glassEffect(
-                    interactive ? .regular.interactive() : .regular,
+                    interactive ? .regular.interactive() : .clear.interactive(),
                     in: .rect(cornerRadius: cornerRadius)
                 )
-                .overlay(shape.strokeBorder(.white.opacity(0.22), lineWidth: 1))
+                .overlay(
+                    shape.strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.55), .white.opacity(0.12)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+                )
         }
     }
 }
@@ -44,6 +55,17 @@ struct CueGlassModifier: ViewModifier {
 extension View {
     func cueGlass(cornerRadius: CGFloat = CueTheme.radiusPanel, interactive: Bool = false) -> some View {
         modifier(CueGlassModifier(cornerRadius: cornerRadius, interactive: interactive))
+    }
+}
+
+struct CueMark: View {
+    var pointSize: CGFloat = 18
+
+    var body: some View {
+        Image(systemName: CueTheme.symbolName)
+            .font(.system(size: pointSize, weight: .medium))
+            .symbolRenderingMode(.monochrome)
+            .accessibilityHidden(true)
     }
 }
 
@@ -56,9 +78,99 @@ struct CueWindowBackground: View {
                 Color(nsColor: .windowBackgroundColor)
             } else {
                 Rectangle()
-                    .fill(.ultraThinMaterial)
+                    .fill(.clear)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 0))
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+struct CueGlassField<Content: View>: View {
+    var title: String
+    var help: String?
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.6)
+            content()
+            if let help {
+                Text(help)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cueGlass(cornerRadius: 18, interactive: true)
+    }
+}
+
+struct CueGlassToggle: View {
+    var title: String
+    var subtitle: String? = nil
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Toggle("", isOn: $isOn)
+                .toggleStyle(.switch)
+                .labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .cueGlass(cornerRadius: 16, interactive: true)
+    }
+}
+
+struct CueLiveSecureField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeNSView(context: Context) -> NSSecureTextField {
+        let field = NSSecureTextField()
+        field.placeholderString = placeholder
+        field.delegate = context.coordinator
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 14)
+        field.textColor = .labelColor
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
+        return field
+    }
+
+    func updateNSView(_ field: NSSecureTextField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text, field.currentEditor() == nil {
+            field.stringValue = text
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSecureTextField else { return }
+            text.wrappedValue = field.stringValue
+        }
     }
 }

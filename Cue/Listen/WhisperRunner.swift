@@ -1,7 +1,7 @@
 import Foundation
 import WhisperKit
 
-final class WhisperRunner: SpeechTranscribing, @unchecked Sendable {
+nonisolated final class WhisperRunner: SpeechTranscribing, @unchecked Sendable {
     private var kit: WhisperKit?
     private var loadedModel: WhisperModelID?
 

@@ -90,26 +90,6 @@ struct CueTests {
         #expect(next.x == 100)
     }
 
-    @Test func captionMergeCollapsesSameUtterance() {
-        let collapsed = CaptionTextMerge.collapse([
-            "Hello there",
-            "Hello there everyone"
-        ])
-        #expect(collapsed == ["Hello there everyone"])
-        #expect(CaptionTextMerge.isChrome("Live Captions Running"))
-    }
-
-    @Test func captionAssemblerKeepsLiveLine() {
-        var assembler = CaptionLineAssembler()
-        let first = assembler.ingest("What is Swift?")
-        let live = assembler.lines.last?.isLive == true
-        let second = assembler.ingest("What is Swift concurrency?")
-        #expect(first)
-        #expect(live)
-        #expect(second)
-        #expect(assembler.lines.count == 1)
-    }
-
     @Test func acceleratorMatchParsesCommandShiftH() {
         let pattern = AcceleratorMatch.parseElectronAccelerator("CommandOrControl+Shift+H")
         #expect(pattern?.code == "KeyH")

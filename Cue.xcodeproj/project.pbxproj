@@ -413,6 +413,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Cue captures system speaker audio to transcribe interview questions on-device.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -451,6 +452,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Cue captures system speaker audio to transcribe interview questions on-device.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";

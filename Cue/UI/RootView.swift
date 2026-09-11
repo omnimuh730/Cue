@@ -23,6 +23,12 @@ struct RootView: View {
             if session.remote.cursor.active {
                 VirtualCursorOverlay(state: session.remote.cursor)
             }
+            if session.settingsOpen {
+                SettingsView(session: session)
+            }
+            if session.searchOpen {
+                SearchView(session: session)
+            }
         }
         .overlay(alignment: .top) {
             if let notice = session.remoteNotice {
@@ -33,12 +39,6 @@ struct RootView: View {
                     .padding(.top, 48)
                     .onTapGesture { session.remoteNotice = nil }
             }
-        }
-        .sheet(isPresented: $session.settingsOpen) {
-            SettingsView(session: session)
-        }
-        .sheet(isPresented: $session.searchOpen) {
-            SearchView(session: session)
         }
         .onAppear {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in

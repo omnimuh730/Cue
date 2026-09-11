@@ -1,130 +1,313 @@
 import AppKit
 import SwiftUI
 
+private enum SettingsSection: String, CaseIterable, Identifiable {
+    case provider
+    case listen
+    case hotkeys
+    case data
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .provider: "AI provider"
+        case .listen: "Interview listen"
+        case .hotkeys: "Hotkeys"
+        case .data: "Data controls"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .provider: "key.fill"
+        case .listen: "waveform"
+        case .hotkeys: "keyboard"
+        case .data: "lock.shield"
+        }
+    }
+}
+
 struct SettingsView: View {
     @Bindable var session: AppSession
-    @State private var section = 0
+    @State private var section: SettingsSection = .provider
     @State private var apiKey = ""
     @State private var draft = PublicSettings.default
+    @State private var saveError: String?
+    @State private var clearKey = false
+    @State private var replacingKey = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 0) {
-                List(selection: $section) {
-                    Text("AI provider").tag(0)
-                    Text("Interview listen").tag(1)
-                    Text("Hotkeys").tag(2)
-                    Text("Data controls").tag(3)
-                }
-                .frame(width: 190)
-                Group {
-                    switch section {
-                    case 0: provider
-                    case 1: listen
-                    case 2: hotkeys
-                    default: data
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .onTapGesture { session.settingsOpen = false }
+
+            VStack(spacing: 0) {
+                header
+                Divider().opacity(0.12)
+                HStack(alignment: .top, spacing: 0) {
+                    navigation
+                    ScrollView {
+                        content
+                            .padding(20)
                     }
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Divider().opacity(0.12)
+                footer
             }
-            Divider()
-            HStack {
-                Spacer()
-                Button("Cancel") { session.settingsOpen = false }
-                Button("Save") {
-                    try? session.settingsStore.save(
-                        draft,
-                        apiKey: apiKey.isEmpty ? nil : apiKey,
-                        clearAPIKey: false
-                    )
-                    session.saveSettings(session.settingsStore.settings)
-                    session.settingsOpen = false
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding()
+            .frame(width: 760, height: 560)
+            .cueGlass(cornerRadius: 28, interactive: true)
+            .shadow(color: .black.opacity(0.28), radius: 40, y: 18)
         }
-        .frame(width: 720, height: 520)
-        .cueGlass(cornerRadius: 20)
-        .onAppear { draft = session.settings }
+        .onAppear {
+            draft = session.settings
+            apiKey = ""
+            clearKey = false
+            replacingKey = false
+            saveError = nil
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Settings")
+                .font(.system(size: 17, weight: .semibold))
+            Spacer()
+            Button {
+                session.settingsOpen = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .cueGlass(cornerRadius: 14, interactive: true)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+    }
+
+    private var navigation: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(SettingsSection.allCases) { item in
+                Button {
+                    section = item
+                } label: {
+                    Label(item.title, systemImage: item.symbol)
+                        .font(.system(size: 13, weight: section == item ? .semibold : .regular))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background {
+                            if section == item {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(.white.opacity(0.16))
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .frame(width: 200)
+        .background(.white.opacity(0.06))
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch section {
+        case .provider: provider
+        case .listen: listen
+        case .hotkeys: hotkeys
+        case .data: data
+        }
     }
 
     private var provider: some View {
-        Form {
-            LabeledContent("API key") {
-                VStack(alignment: .leading) {
-                    SecureField("sk-…", text: $apiKey)
-                    if let hint = session.settings.keyHint {
-                        Text("Saved: \(hint)").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            CueGlassField(
+                title: "OpenAI API key",
+                help: "Stored in the macOS Keychain and a locked file in Application Support. Rebuilds in Xcode keep the key."
+            ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let hint = session.settings.keyHint, apiKey.isEmpty, !clearKey, !replacingKey {
+                        HStack {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                            Text("Saved on this Mac · \(hint)")
+                                .font(.system(size: 13, weight: .medium))
+                            Spacer()
+                            Button("Replace") { replacingKey = true }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 12, weight: .semibold))
+                            Button("Remove") { clearKey = true }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    if session.settings.keyHint == nil || !apiKey.isEmpty || clearKey || replacingKey {
+                        CueLiveSecureField(text: $apiKey, placeholder: "sk-…")
+                            .frame(height: 22)
                     }
                 }
             }
-            Picker("Model", selection: $draft.model) {
-                ForEach(ModelCatalog.models) { model in
-                    Text(model.label).tag(model.id)
+
+            CueGlassField(title: "Model") {
+                HStack {
+                    Picker("Model", selection: $draft.model) {
+                        ForEach(ModelCatalog.models) { model in
+                            Text(model.label).tag(model.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    Spacer()
+                    Picker("Thinking", selection: $draft.reasoningEffort) {
+                        ForEach(ModelCatalog.definition(for: draft.model).supportedEfforts, id: \.self) { effort in
+                            Text(ModelCatalog.definition(for: effort).label).tag(effort)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
                 }
             }
-            Picker("Thinking", selection: $draft.reasoningEffort) {
-                ForEach(ModelCatalog.definition(for: draft.model).supportedEfforts, id: \.self) { effort in
-                    Text(ModelCatalog.definition(for: effort).label).tag(effort)
-                }
+
+            CueGlassToggle(title: "Web search", subtitle: "Let the model verify time-sensitive facts.", isOn: $draft.webSearchEnabled)
+
+            CueGlassField(title: "System instruction") {
+                TextEditor(text: $draft.systemInstruction)
+                    .font(.system(size: 13))
+                    .frame(minHeight: 90)
+                    .scrollContentBackground(.hidden)
             }
-            Toggle("Web search", isOn: $draft.webSearchEnabled)
-            TextField("System instruction", text: $draft.systemInstruction, axis: .vertical)
-                .lineLimit(4...8)
         }
     }
 
     private var listen: some View {
-        Form {
-            Picker("Listen mode", selection: $draft.listenMode) {
-                ForEach(ListenMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
+        VStack(alignment: .leading, spacing: 14) {
+            CueGlassField(title: "Listen mode", help: draft.listenMode.help) {
+                Picker("Listen mode", selection: $draft.listenMode) {
+                    ForEach(ListenMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.segmented)
             }
-            Text(draft.listenMode.help).font(.caption).foregroundStyle(.secondary)
-            Picker("Whisper model", selection: $draft.whisperModel) {
-                ForEach(WhisperModelID.allCases) { model in
-                    Text(model.label).tag(model)
+            CueGlassField(title: "Whisper model") {
+                Picker("Whisper", selection: $draft.whisperModel) {
+                    ForEach(WhisperModelID.allCases) { model in
+                        Text(model.label).tag(model)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
             }
-            Toggle("Audio auto mode (VAD)", isOn: $draft.audioAutoMode)
+            CueGlassToggle(
+                title: "Audio auto mode",
+                subtitle: "Segment speaker audio with VAD. Off means hotkey-only capture.",
+                isOn: $draft.audioAutoMode
+            )
             if draft.listenMode == .accessibility {
-                Text(AccessibilityTrust.isTrusted ? "Accessibility is granted." : "Cue needs Accessibility plus Live Captions.")
-                    .font(.caption)
-                Button("Request Accessibility") { AccessibilityTrust.request() }
+                CueGlassField(title: "Accessibility") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(AccessibilityTrust.isTrusted
+                             ? "Accessibility is granted. Enable Live Captions in System Settings."
+                             : "Cue needs Accessibility plus Live Captions.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                        Button("Request Accessibility") { AccessibilityTrust.request() }
+                            .buttonStyle(.plain)
+                    }
+                }
             }
         }
     }
 
     private var hotkeys: some View {
-        Form {
-            Toggle("Passive focus mode", isOn: $draft.passiveFocusMode)
-            Toggle("Always on top", isOn: $draft.alwaysOnTop)
-            Slider(value: $draft.windowOpacity, in: 0.15...1) {
-                Text("Opacity")
+        VStack(alignment: .leading, spacing: 14) {
+            CueGlassToggle(title: "Passive focus", subtitle: "Show Cue without stealing keyboard focus.", isOn: $draft.passiveFocusMode)
+            CueGlassToggle(title: "Always on top", isOn: $draft.alwaysOnTop)
+            CueGlassField(title: "Opacity") {
+                Slider(value: $draft.windowOpacity, in: 0.15...1)
             }
             ForEach(HotkeyCatalog.items) { item in
-                LabeledContent(item.label) {
-                    TextField("", text: binding(for: item.id))
-                        .frame(width: 220)
+                CueGlassField(title: item.label, help: item.description) {
+                    TextField("Shortcut", text: binding(for: item.id))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, design: .monospaced))
                 }
             }
         }
     }
 
     private var data: some View {
-        Form {
-            Toggle("Stealth mode (hide from screen capture)", isOn: $draft.stealthMode)
-            Button("Export current chat") {
-                exportActive()
-            }
-            Button("Delete all chats", role: .destructive) {
-                for conversation in session.conversations {
-                    session.deleteConversation(conversation)
+        VStack(alignment: .leading, spacing: 14) {
+            CueGlassToggle(
+                title: "Stealth mode",
+                subtitle: "Exclude Cue from screen capture APIs.",
+                isOn: $draft.stealthMode
+            )
+            CueGlassField(title: "Chat data") {
+                HStack {
+                    Button("Copy current chat") { exportActive() }
+                        .buttonStyle(.plain)
+                    Spacer()
+                    Button("Delete all chats") {
+                        for conversation in session.conversations {
+                            session.deleteConversation(conversation)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.red)
                 }
             }
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 12) {
+            if let saveError {
+                Text(saveError)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+            Spacer()
+            Button("Cancel") { session.settingsOpen = false }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .cueGlass(cornerRadius: 16, interactive: true)
+            Button("Save") { save() }
+                .buttonStyle(.plain)
+                .font(.system(size: 14, weight: .semibold))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .foregroundStyle(.white)
+                .background(Color.accentColor, in: Capsule())
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+    }
+
+    private func save() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        saveError = nil
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try session.saveSettings(
+                draft,
+                apiKey: trimmed.isEmpty ? nil : trimmed,
+                clearAPIKey: clearKey && trimmed.isEmpty
+            )
+            session.settingsOpen = false
+        } catch {
+            saveError = error.localizedDescription
         }
     }
 

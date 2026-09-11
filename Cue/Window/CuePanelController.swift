@@ -137,7 +137,7 @@ final class StatusItemController {
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "circle.dashed.inset.filled", accessibilityDescription: "Cue")
+            button.image = NSImage(systemSymbolName: CueTheme.symbolName, accessibilityDescription: "Cue")
             button.image?.isTemplate = true
             button.toolTip = "Cue"
         }

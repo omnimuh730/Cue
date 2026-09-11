@@ -18,6 +18,7 @@ final class ListenController {
 
     var status = ListenStatus.idle
     var onTranscript: ((String) -> Void)?
+    var onCaptionLines: (([CaptionLine]) -> Void)?
     var onStatus: ((ListenStatus) -> Void)?
 
     func configure(settings: PublicSettings) {
@@ -160,10 +161,7 @@ final class ListenController {
     private func ingestCaptions(_ raw: String) {
         guard assembler.ingest(raw) else { return }
         status.phase = .listening
-        if let live = assembler.lines.last(where: \.isLive)?.text, live != lastEmittedText {
-            lastEmittedText = live
-            onTranscript?(live)
-        }
+        onCaptionLines?(assembler.lines)
         emit(force: true)
     }
 
@@ -215,7 +213,9 @@ final class ListenController {
         status.phase = .transcribing
         emit(force: true)
         do {
-            let text = try await transcriber(for: status.mode).transcribe(pcm: next.pcm, sampleRate: 16_000)
+            let runner = transcriber(for: status.mode)
+            let pcm = next.pcm
+            let text = try await runner.transcribe(pcm: pcm, sampleRate: 16_000)
             ring.setWatermark(sample: next.endSample)
             let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleaned.isEmpty, cleaned != lastEmittedText {

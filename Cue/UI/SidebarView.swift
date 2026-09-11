@@ -5,7 +5,8 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: CueTheme.Spacing.sm) {
-            HStack {
+            HStack(spacing: CueTheme.Spacing.xs) {
+                CueMark(pointSize: 14)
                 Text("Cue")
                     .font(.headline)
                 Spacer()

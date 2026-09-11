@@ -1,5 +1,7 @@
 import Foundation
 
+/// Unbounded caption cache. Live Captions’ AX snapshot is a short window;
+/// committed rows stay here until `reset()` (double numpad `.`).
 nonisolated struct CaptionLineAssembler {
     private(set) var lines: [CaptionLine] = []
     private var lastParts: [String] = []
@@ -28,6 +30,7 @@ nonisolated struct CaptionLineAssembler {
 
         if let liveIndex = lines.lastIndex(where: \.isLive) {
             let previousLive = lines[liveIndex].text
+            // LastCry: same rolling caption → pop last chunk and replace it.
             if CaptionTextMerge.isSameUtterance(previousLive, liveText) {
                 lines[liveIndex].text = CaptionTextMerge.preferred(previousLive, liveText)
                 for line in overlayCommitted {

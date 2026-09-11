@@ -41,7 +41,7 @@ nonisolated struct ListenStatus: Equatable, Sendable {
     )
 }
 
-protocol SpeechTranscribing: AnyObject, Sendable {
+nonisolated protocol SpeechTranscribing: AnyObject, Sendable {
     func prepare(model: WhisperModelID, onProgress: @escaping @Sendable (Double) -> Void) async throws
     func transcribe(pcm: [Float], sampleRate: Int) async throws -> String
 }

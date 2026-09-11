@@ -5,20 +5,54 @@ struct SearchView: View {
     @State private var query = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: CueTheme.Spacing.md) {
-            TextField("Search chats", text: $query)
-                .textFieldStyle(.roundedBorder)
-            List(filtered, id: \.identifier) { conversation in
-                Button(conversation.title) {
-                    session.activeID = conversation.identifier
-                    session.searchOpen = false
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .onTapGesture { session.searchOpen = false }
+
+            VStack(alignment: .leading, spacing: CueTheme.Spacing.md) {
+                HStack {
+                    Text("Search")
+                        .font(.system(size: 16, weight: .semibold))
+                    Spacer()
+                    Button {
+                        session.searchOpen = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .cueGlass(cornerRadius: 14, interactive: true)
                 }
-                .buttonStyle(.plain)
+                TextField("Search chats", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 15))
+                    .padding(12)
+                    .cueGlass(cornerRadius: 16, interactive: true)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(filtered, id: \.identifier) { conversation in
+                            Button {
+                                session.activeID = conversation.identifier
+                                session.searchOpen = false
+                            } label: {
+                                Text(conversation.title)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                            }
+                            .buttonStyle(.plain)
+                            .cueGlass(cornerRadius: 12, interactive: true)
+                        }
+                    }
+                }
             }
+            .padding(20)
+            .frame(width: 520, height: 400)
+            .cueGlass(cornerRadius: 28, interactive: true)
+            .shadow(color: .black.opacity(0.28), radius: 40, y: 18)
         }
-        .padding()
-        .frame(width: 480, height: 360)
-        .cueGlass(cornerRadius: 20)
     }
 
     private var filtered: [Conversation] {

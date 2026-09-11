@@ -1,5 +1,8 @@
 import Foundation
 
+/// Ports LastCry’s rolling-caption merge (`checkNewLine` + pop/replace).
+/// A new crop replaces the live chunk when it is the same utterance grown or
+/// lightly revised — punctuation and small token edits do not start a row.
 nonisolated enum CaptionTextMerge {
     static func collapse(_ parts: [String]) -> [String] {
         var collapsed: [String] = []
@@ -36,6 +39,7 @@ nonisolated enum CaptionTextMerge {
         }
     }
 
+    /// LastCry keeps the latest crop of the same caption window.
     static func preferred(_ older: String, _ newer: String) -> String {
         if newer.count >= older.count { return newer }
         let olderFolded = folded(older)
@@ -44,6 +48,7 @@ nonisolated enum CaptionTextMerge {
         return newer
     }
 
+    /// True when `newer` is the same spoken line as `older`, grown or revised.
     static func isSameUtterance(_ older: String, _ newer: String) -> Bool {
         if older == newer { return true }
         if newer.hasPrefix(older) || older.hasPrefix(newer) { return true }
@@ -71,6 +76,7 @@ nonisolated enum CaptionTextMerge {
         return alignedPrefix(short, long)
     }
 
+    /// Words in `prev` that have scrolled off before the overlap with `current`.
     static func scrolledOffPrefix(prev: String, current: String) -> String? {
         if isSameUtterance(prev, current) { return nil }
 

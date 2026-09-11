@@ -26,6 +26,7 @@ final class AppSession {
     var remoteNotice: String?
     private var streamTask: Task<Void, Never>?
     private var cancelToken: CancellationToken?
+    private var lastCaptionDraft = ""
 
     var settings: PublicSettings { settingsStore.settings }
 
@@ -44,6 +45,9 @@ final class AppSession {
         listen.configure(settings: settingsStore.settings)
         listen.onTranscript = { [weak self] text in
             self?.appendDraft(text)
+        }
+        listen.onCaptionLines = { [weak self] lines in
+            self?.applyCaptionLines(lines)
         }
         listen.onStatus = { _ in }
         remote.onHotkey = { [weak self] action in
@@ -82,8 +86,8 @@ final class AppSession {
         panel?.apply(settings: settings, remoteActive: remote.active)
     }
 
-    func saveSettings(_ next: PublicSettings, apiKey: String? = nil, clearAPIKey: Bool = false) {
-        try? settingsStore.save(next, apiKey: apiKey, clearAPIKey: clearAPIKey)
+    func saveSettings(_ next: PublicSettings, apiKey: String? = nil, clearAPIKey: Bool = false) throws {
+        try settingsStore.save(next, apiKey: apiKey, clearAPIKey: clearAPIKey)
         listen.configure(settings: settingsStore.settings)
         hotkeys.register(settings.hotkeyMap)
         remote.updateHotkeys(settings.hotkeyMap)
@@ -97,6 +101,7 @@ final class AppSession {
         reloadConversations()
         activeID = conversation.identifier
         draft = ""
+        lastCaptionDraft = ""
         attachments = []
     }
 
@@ -120,7 +125,7 @@ final class AppSession {
         }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
-        guard let apiKey = KeychainAPIKeyStore.load() else {
+        guard let apiKey = APIKeyStore.load() else {
             settingsOpen = true
             return
         }
@@ -140,6 +145,7 @@ final class AppSession {
             conversation.title = String(text.prefix(48)).ifEmpty("New chat")
         }
         draft = ""
+        lastCaptionDraft = ""
         attachments = []
         listen.resetAfterSend()
 
@@ -221,6 +227,7 @@ final class AppSession {
             Task { await listen.listenOff(settings: settings) }
         case .clearAudioCache:
             listen.resetAfterSend()
+            lastCaptionDraft = ""
             draft = ""
         case .cycleModel:
             let model = ModelCatalog.nextModel(after: settings.model)
@@ -279,6 +286,12 @@ final class AppSession {
         } else {
             draft += " " + text
         }
+    }
+
+    private func applyCaptionLines(_ lines: [CaptionLine]) {
+        let applied = CaptionDraftSync.apply(snapshot: lines, to: draft, previousSnapshot: lastCaptionDraft)
+        draft = applied.draft
+        lastCaptionDraft = applied.snapshot
     }
 
     private func applyRemoteText(_ text: String) {

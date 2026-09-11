@@ -6,7 +6,7 @@ struct CueApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Cue", systemImage: "circle.dashed.inset.filled") {
+        MenuBarExtra("Cue", systemImage: CueTheme.symbolName) {
             Button("Show / Hide Cue") {
                 NotificationCenter.default.post(name: .cueToggleWindow, object: nil)
             }

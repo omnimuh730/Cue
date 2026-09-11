@@ -32,12 +32,10 @@ struct ComposerView: View {
                 listenPill
                 Spacer()
                 ModelPicker(settings: session.settings) { model, effort in
-                    session.saveSettings({
-                        var next = session.settings
-                        next.model = model
-                        next.reasoningEffort = effort
-                        return next
-                    }())
+                    session.settingsStore.patch { settings in
+                        settings.model = model
+                        settings.reasoningEffort = effort
+                    }
                 }
                 Button {
                     session.send()
