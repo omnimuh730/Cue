@@ -140,16 +140,13 @@ struct CodexClient {
         try? stdin.fileHandleForWriting.close()
 
         let mapper = CodexEventMapper(model: request.model, effort: request.effort, threadID: request.threadID)
-        let watchdog = Task.detached {
-            while !Task.isCancelled {
-                if signal.isCancelled {
-                    if process.isRunning { process.terminate() }
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(120))
-            }
+        signal.onCancel {
+            if process.isRunning { process.terminate() }
         }
-        defer { watchdog.cancel() }
+        if Task.isCancelled || signal.isCancelled {
+            if process.isRunning { process.terminate() }
+            throw CancellationError()
+        }
 
         do {
             for try await line in stdout.fileHandleForReading.bytes.lines {
@@ -165,6 +162,11 @@ struct CodexClient {
         } catch {
             if process.isRunning { process.terminate() }
             throw error
+        }
+
+        if signal.isCancelled || Task.isCancelled {
+            if process.isRunning { process.terminate() }
+            throw CancellationError()
         }
 
         process.waitUntilExit()

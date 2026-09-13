@@ -184,4 +184,34 @@ struct CueTests {
         #expect(state.emittedUsage)
         #expect(events.count == 1)
     }
+
+    @Test func composerSendInterruptsLiveTurnInsteadOfWaiting() {
+        #expect(ComposerPrimaryAction.resolve(isStreaming: false, hasPayload: true) == .send)
+        #expect(ComposerPrimaryAction.resolve(isStreaming: false, hasPayload: false) == .send)
+        #expect(ComposerPrimaryAction.resolve(isStreaming: true, hasPayload: false) == .stop)
+        #expect(ComposerPrimaryAction.resolve(isStreaming: true, hasPayload: true) == .send)
+    }
+
+    @Test func cancellationTokenRunsHandlersImmediately() {
+        let token = CancellationToken()
+        var ran = 0
+        token.onCancel { ran += 1 }
+        token.cancel()
+        token.cancel()
+        #expect(ran == 1)
+        token.onCancel { ran += 1 }
+        #expect(ran == 2)
+        #expect(token.isCancelled)
+    }
+
+    @Test func continuationReplaysInterruptedAssistantThenFollowUp() {
+        let turns = [
+            ChatTurn(id: UUID(), role: .user, content: "Hi", createdAt: .now, status: .complete, attachments: []),
+            ChatTurn(id: UUID(), role: .assistant, content: "Partial", createdAt: .now, status: .complete, attachments: []),
+            ChatTurn(id: UUID(), role: .user, content: "Continue", createdAt: .now, status: .complete, attachments: [])
+        ]
+        let continuation = ChatContinuationBuilder.build(from: turns)
+        #expect(continuation.previousResponseID == nil)
+        #expect(continuation.messages.map(\.content) == ["Hi", "Partial", "Continue"])
+    }
 }

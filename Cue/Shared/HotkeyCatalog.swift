@@ -72,7 +72,7 @@ nonisolated enum HotkeyCatalog {
         .init(id: .clearAudioCache, label: "Clear audio / draft transcript", description: "Forget recording so far and clear the composer draft", group: .audio),
         .init(id: .cycleModel, label: "Cycle chat model", description: "Switch to the next OpenAI chat model", group: .chat),
         .init(id: .cycleEffort, label: "Cycle reasoning effort", description: "Switch to the next thinking effort", group: .chat),
-        .init(id: .sendMessage, label: "Send message", description: "Same as the composer send button", group: .chat),
+        .init(id: .sendMessage, label: "Send message", description: "Send the draft, interrupting a live reply; stops if the composer is empty", group: .chat),
         .init(id: .newChat, label: "New chat", description: "Start a fresh conversation", group: .chat),
         .init(id: .toggleMermaidMode, label: "Toggle Mermaid diagram / code", description: "Switch Mermaid blocks between diagram and source code", group: .chat),
         .init(id: .screenshotDesktop, label: "Desktop screenshot", description: "Capture the full desktop and attach it", group: .capture),

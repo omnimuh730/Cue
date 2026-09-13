@@ -130,15 +130,15 @@ struct ComposerView: View {
                 Button {
                     session.send()
                 } label: {
-                    Image(systemName: session.isStreaming ? "stop.fill" : "arrow.up")
+                    Image(systemName: session.composerPrimaryAction == .stop ? "stop.fill" : "arrow.up")
                         .font(.system(size: 13, weight: .bold))
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.plain)
-                .background(session.isStreaming ? Color.red.opacity(0.85) : Color.accentColor, in: Circle())
+                .background(session.composerPrimaryAction == .stop ? Color.red.opacity(0.85) : Color.accentColor, in: Circle())
                 .foregroundStyle(.white)
-                .help(session.isStreaming ? "Stop this response" : "Send")
-                .animation(.easeInOut(duration: 0.15), value: session.isStreaming)
+                .help(session.composerPrimaryAction == .stop ? "Stop this response" : "Send")
+                .animation(.easeInOut(duration: 0.15), value: session.composerPrimaryAction)
             }
         }
         .padding(.horizontal, 16)
@@ -164,7 +164,7 @@ struct ComposerView: View {
 
     private var backgroundPill: some View {
         HStack(spacing: 5) {
-            StreamingIndicator()
+            CueMarkSpin(pointSize: 14, spinning: true, style: .busy)
                 .frame(width: 18)
             Text(backgroundStreams == 1 ? "1 chat responding" : "\(backgroundStreams) chats responding")
                 .font(.caption)

@@ -128,7 +128,7 @@ struct SidebarView: View {
                     }
                     Spacer(minLength: 0)
                     if streaming {
-                        StreamingIndicator()
+                        CueMarkSpin(pointSize: 14, spinning: true, style: .busy)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -218,7 +218,7 @@ struct SidebarView: View {
                     }
                     Spacer(minLength: 0)
                     if streaming {
-                        StreamingIndicator()
+                        CueMarkSpin(pointSize: 14, spinning: true, style: .busy)
                     } else if unread {
                         Circle()
                             .fill(Color.accentColor)
@@ -297,30 +297,6 @@ struct WorkspaceAvatar: View {
                     .fill(isProject ? Color.accentColor : Color.primary.opacity(0.1))
             )
             .accessibilityHidden(true)
-    }
-}
-
-/// Three pulsing dots; the sidebar's "still working" tell for background chats.
-struct StreamingIndicator: View {
-    @State private var phase = 0
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(Color.accentColor)
-                    .frame(width: 5, height: 5)
-                    .opacity(phase == index ? 1 : 0.3)
-            }
-        }
-        .frame(width: 24, height: 14)
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(320))
-                phase = (phase + 1) % 3
-            }
-        }
-        .accessibilityLabel("Responding")
     }
 }
 

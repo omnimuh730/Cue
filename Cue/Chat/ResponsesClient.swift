@@ -181,7 +181,11 @@ struct ResponsesClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        if Task.isCancelled || signal.isCancelled { throw CancellationError() }
+        signal.onCancel { bytes.task.cancel() }
+        if Task.isCancelled || signal.isCancelled {
+            bytes.task.cancel()
+            throw CancellationError()
+        }
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             var message = "OpenAI request failed (\(http.statusCode))."
             var collected = ""
@@ -299,6 +303,7 @@ final class ResponseStreamState {
 final class CancellationToken: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
+    private var handlers: [() -> Void] = []
 
     var isCancelled: Bool {
         lock.lock()
@@ -306,9 +311,28 @@ final class CancellationToken: @unchecked Sendable {
         return cancelled
     }
 
+    /// Runs `handler` immediately if already cancelled, otherwise on the next `cancel()`.
+    func onCancel(_ handler: @escaping () -> Void) {
+        lock.lock()
+        if cancelled {
+            lock.unlock()
+            handler()
+            return
+        }
+        handlers.append(handler)
+        lock.unlock()
+    }
+
     func cancel() {
         lock.lock()
+        guard !cancelled else {
+            lock.unlock()
+            return
+        }
         cancelled = true
+        let handlers = self.handlers
+        self.handlers = []
         lock.unlock()
+        for handler in handlers { handler() }
     }
 }

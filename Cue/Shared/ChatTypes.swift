@@ -174,6 +174,16 @@ nonisolated struct ChatContinuation: Equatable, Sendable {
     var project: ProjectContext? = nil
 }
 
+/// Composer primary action. A live turn never blocks send: typed follow-ups interrupt immediately.
+nonisolated enum ComposerPrimaryAction: Equatable, Sendable {
+    case send
+    case stop
+
+    static func resolve(isStreaming: Bool, hasPayload: Bool) -> ComposerPrimaryAction {
+        isStreaming && !hasPayload ? .stop : .send
+    }
+}
+
 nonisolated enum ChatError: LocalizedError {
     case missingAPIKey
     case emptyMessage

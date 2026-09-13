@@ -122,6 +122,15 @@ final class AppSession {
         return streamingIDs.contains(activeID)
     }
 
+    var hasComposerPayload: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+    }
+
+    /// Stop while a reply is live and the composer is empty; otherwise send (interrupting if needed).
+    var composerPrimaryAction: ComposerPrimaryAction {
+        .resolve(isStreaming: isStreaming, hasPayload: hasComposerPayload)
+    }
+
     var activeActivity: String? {
         activeID.flatMap { activities[$0] }
     }
@@ -516,12 +525,13 @@ final class AppSession {
 
     // MARK: - Sending
 
-    /// Sends the draft in the active conversation, or stops that conversation's turn if one is running.
+    /// Sends the draft, interrupting any in-flight turn in this conversation first.
+    /// An empty composer while streaming only stops; it never waits for the current reply to finish.
     func send() {
         guard let activeID else { return }
         if streamingIDs.contains(activeID) {
             stop(conversationID: activeID)
-            return
+            if !hasComposerPayload { return }
         }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
@@ -576,8 +586,11 @@ final class AppSession {
             guard let self else { return }
             do {
                 for try await event in stream {
+                    if Task.isCancelled || request.token.isCancelled { break }
                     apply(event, request: request)
                 }
+            } catch is CancellationError {
+                // `stop` already finalized this turn so a follow-up could start immediately.
             } catch {
                 apply(.error(error.localizedDescription), request: request)
             }
@@ -585,10 +598,23 @@ final class AppSession {
         }
     }
 
+    /// Cancels the in-flight turn immediately: tokens, process, and UI state. Does not wait for
+    /// remaining SSE/Codex output or for the bubble to finish animating.
     func stop(conversationID: UUID) {
         guard let request = requests[conversationID] else { return }
         request.token.cancel()
         request.task?.cancel()
+        flush(request, force: true)
+        if let (_, message) = target(for: request), message.status == .streaming {
+            message.statusRaw = MessageStatus.complete.rawValue
+            if message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                message.content = "Response interrupted."
+            }
+        }
+        requests[conversationID] = nil
+        streamingIDs.remove(conversationID)
+        activities[conversationID] = nil
+        save()
     }
 
     private func makeStream(
@@ -851,6 +877,7 @@ final class AppSession {
     /// caller insists (turn end), so streaming never blocks on disk per token.
     private func flush(_ request: ChatRequest, force: Bool = false) {
         request.flushScheduled = false
+        guard force || requests[request.conversationID] === request else { return }
         guard let (conversation, message) = target(for: request) else { return }
         if !request.pendingText.isEmpty {
             message.content += request.pendingText
@@ -873,6 +900,7 @@ final class AppSession {
     }
 
     private func apply(_ event: ChatStreamEvent, request: ChatRequest) {
+        guard requests[request.conversationID] === request else { return }
         if case .delta(let delta) = event {
             if request.pendingText.isEmpty, let (conversation, _) = target(for: request) {
                 activities[conversation.identifier] = nil
