@@ -413,12 +413,11 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Cue/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Cue captures system speaker audio to transcribe interview questions on-device.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Cue does not need the microphone for interview listen; system speaker audio is used instead.";
-				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Cue needs Screen Recording to capture system speaker audio and desktop screenshots.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Cue uses on-device speech recognition for Apple Speech listen mode.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -452,12 +451,11 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Cue/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Cue captures system speaker audio to transcribe interview questions on-device.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Cue does not need the microphone for interview listen; system speaker audio is used instead.";
-				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Cue needs Screen Recording to capture system speaker audio and desktop screenshots.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Cue uses on-device speech recognition for Apple Speech listen mode.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

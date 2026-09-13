@@ -47,28 +47,17 @@ enum ScreenshotService {
     }
 
     private static func encode(_ image: CGImage, name: String) throws -> ScreenshotCapture {
-        let bitmap = NSBitmapImageRep(cgImage: image)
-        guard let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.82]) else {
+        guard let dataURL = ImageAttachmentEncoder.jpegDataURL(image) else {
             throw ChatError.transport("Could not encode screenshot.")
         }
-        return ScreenshotCapture(
-            dataURL: "data:image/jpeg;base64,\(jpeg.base64EncodedString())",
-            name: name,
-            mimeType: "image/jpeg"
-        )
+        return ScreenshotCapture(dataURL: dataURL, name: name, mimeType: "image/jpeg")
     }
 
     private static func encode(_ image: NSImage, name: String) throws -> ScreenshotCapture {
-        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
-              let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.82])
-        else {
+        guard let dataURL = ImageAttachmentEncoder.jpegDataURL(image) else {
             throw ChatError.transport("Could not encode screenshot.")
         }
-        return ScreenshotCapture(
-            dataURL: "data:image/jpeg;base64,\(jpeg.base64EncodedString())",
-            name: name,
-            mimeType: "image/jpeg"
-        )
+        return ScreenshotCapture(dataURL: dataURL, name: name, mimeType: "image/jpeg")
     }
 
     private static func timestamp() -> String {

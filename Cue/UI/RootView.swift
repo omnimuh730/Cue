@@ -12,16 +12,26 @@ struct RootView: View {
                         .frame(width: CueTheme.sidebarWidth)
                         .cueGlass(cornerRadius: 18, interactive: true)
                         .padding(.leading, CueTheme.sidebarInset)
-                        .padding(.vertical, CueTheme.sidebarInset)
+                        .padding(.top, CueTheme.headerHeight + CueTheme.sidebarInset)
+                        .padding(.bottom, CueTheme.sidebarInset)
                         .padding(.trailing, 4)
                 }
                 VStack(spacing: 0) {
                     ChatView(session: session)
+                        // Reserve the toolbar band; the bar itself is drawn window-wide below so
+                        // scrolled content passes beneath the glass.
+                        .safeAreaInset(edge: .top, spacing: 0) {
+                            Color.clear.frame(height: CueTheme.headerHeight)
+                        }
                     ComposerView(session: session)
                         .padding(.horizontal, CueTheme.composerInset)
                         .padding(.bottom, CueTheme.composerInset)
                 }
-                .overlay(alignment: .top) { ChatTopStrip(session: session) }
+            }
+            .ignoresSafeArea(edges: .top)
+            .overlay(alignment: .top) {
+                ChatToolbar(session: session)
+                    .ignoresSafeArea(edges: .top)
             }
             if session.settingsOpen {
                 SettingsView(session: session)
@@ -39,6 +49,21 @@ struct RootView: View {
                 ThreadInfoView(conversation: conversation, project: session.project(for: conversation)) {
                     session.infoConversationID = nil
                 }
+            }
+            if let settingsID = session.projectSettingsID,
+               let project = session.projects.first(where: { $0.identifier == settingsID }) {
+                ProjectSettingsView(session: session, project: project) {
+                    session.projectSettingsID = nil
+                }
+            }
+            if session.newProjectPromptOpen {
+                NewProjectDialog(
+                    onCreate: { name in
+                        session.newProjectPromptOpen = false
+                        session.createProject(name: name)
+                    },
+                    onCancel: { session.newProjectPromptOpen = false }
+                )
             }
             if let project = session.indexPrompt {
                 IndexProjectDialog(
@@ -80,6 +105,14 @@ struct RootView: View {
                 }
                 if event.keyCode == 53, session.indexPrompt != nil {
                     session.skipProjectIndex()
+                    return nil
+                }
+                if event.keyCode == 53, session.newProjectPromptOpen {
+                    session.newProjectPromptOpen = false
+                    return nil
+                }
+                if event.keyCode == 53, session.projectSettingsID != nil {
+                    session.projectSettingsID = nil
                     return nil
                 }
                 if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "n" {

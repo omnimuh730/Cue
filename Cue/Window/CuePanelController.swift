@@ -31,6 +31,14 @@ final class CuePanelController: NSObject, NSWindowDelegate {
         panel.title = "Cue"
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
+        // A blank unified-compact toolbar makes AppKit center the traffic lights in a 40 pt
+        // band (CueTheme.headerHeight), matching the glass toolbar drawn by SwiftUI beneath it.
+        let toolbar = NSToolbar(identifier: "cue.titlebar")
+        toolbar.showsBaselineSeparator = false
+        toolbar.allowsUserCustomization = false
+        toolbar.displayMode = .iconOnly
+        panel.toolbar = toolbar
+        panel.toolbarStyle = .unifiedCompact
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false

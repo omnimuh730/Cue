@@ -1,18 +1,57 @@
 import AppKit
 import SwiftUI
 
+/// Holds scroll-follow state outside SwiftUI so geometry ticks do not rebuild the transcript.
+private final class ChatScrollFollowBox {
+    var follow = ChatScrollFollow()
+}
+
 struct ChatView: View {
     @Bindable var session: AppSession
+    @State private var followBox = ChatScrollFollowBox()
+
+    private static let bottomAnchor = "chat-bottom"
 
     var body: some View {
+        let messages = session.activeMessages
+        Group {
+            if messages.isEmpty {
+                emptyState
+            } else {
+                transcript
+            }
+        }
+        // Never wait for the empty-hero letter cascade (or its removal) before a send lands.
+        .animation(nil, value: messages.isEmpty)
+    }
+
+    private var emptyState: some View {
+        GeometryReader { geo in
+            ScrollView {
+                EmptyChatView(
+                    project: session.activeProject,
+                    onProjectSettings: {
+                        if let id = session.activeProject?.identifier {
+                            session.projectSettingsID = id
+                        }
+                    },
+                    onNewProject: { session.newProjectPromptOpen = true },
+                    onOpenCodeFolder: { session.openProjectFolder() }
+                )
+                .frame(maxWidth: CueTheme.readingColumnMax)
+                .frame(maxWidth: .infinity, minHeight: geo.size.height)
+                .padding(.horizontal, CueTheme.Spacing.lg)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 28) {
-                    let messages = session.activeMessages
-                    if messages.isEmpty {
-                        emptyState
-                    }
-                    ForEach(messages, id: \.identifier) { message in
+                    ForEach(session.activeMessages, id: \.identifier) { message in
                         MessageBubble(
                             message: message,
                             mermaidAsCode: session.mermaidAsCode,
@@ -21,6 +60,9 @@ struct ChatView: View {
                         )
                         .id(message.identifier)
                     }
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomAnchor)
                 }
                 .frame(maxWidth: CueTheme.readingColumnMax)
                 .frame(maxWidth: .infinity)
@@ -28,52 +70,40 @@ struct ChatView: View {
                 .padding(.top, CueTheme.Spacing.md)
                 .padding(.bottom, CueTheme.Spacing.lg)
             }
-            .onChange(of: session.activeMessages.last?.content.count) { _, _ in
-                if let id = session.activeMessages.last?.identifier {
-                    proxy.scrollTo(id, anchor: .bottom)
+            .onScrollGeometryChange(for: ChatScrollSnapshot.self) { geometry in
+                ChatScrollSnapshot(
+                    contentHeight: geometry.contentSize.height,
+                    visibleMaxY: geometry.visibleRect.maxY
+                )
+            } action: { _, snapshot in
+                if followBox.follow.apply(snapshot) {
+                    scrollToLatest(proxy)
                 }
             }
-            .onChange(of: session.activeID) { _, _ in
-                if let id = session.activeMessages.last?.identifier {
-                    proxy.scrollTo(id, anchor: .bottom)
+            .onChange(of: session.activeMessages.count) { previous, next in
+                if next > previous {
+                    followBox.follow.jumpToLatest()
                 }
+                scrollToLatest(proxy)
+            }
+            .onChange(of: session.activeID) { _, _ in
+                followBox.follow.jumpToLatest()
+                scrollToLatest(proxy)
+            }
+            .onAppear {
+                followBox.follow.jumpToLatest()
+                scrollToLatest(proxy)
             }
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: CueTheme.Spacing.sm) {
-            CueMark(pointSize: 36)
-                .padding(.bottom, CueTheme.Spacing.xs)
-            Text("Cue")
-                .font(.system(size: 27, weight: .medium))
-            if let project = session.activeProject {
-                Text("Cue will read **\(project.name)** with Codex and answer from that codebase.")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Text(project.catalog == nil ? "Not indexed — Codex explores the tree on demand." : "Indexed \(project.catalogAt.map { $0.formatted(.relative(presentation: .named)) } ?? "")")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            } else {
-                Text("Ask anything. Listen, capture, and stay out of the way.")
-                    .foregroundStyle(.secondary)
-                Button {
-                    session.openProjectFolder()
-                } label: {
-                    Label("Load project", systemImage: "folder.badge.plus")
-                        .font(.system(size: 13, weight: .medium))
-                        .padding(.horizontal, 14)
-                        .frame(height: 32)
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .cueGlass(cornerRadius: 16, interactive: true)
-                .padding(.top, CueTheme.Spacing.xs)
-                .help("Chat about a local codebase through the Codex CLI")
-            }
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        guard followBox.follow.shouldFollow else { return }
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) {
+            proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 80)
     }
 }
 
@@ -86,6 +116,9 @@ struct MessageBubble: View {
     var activity: String? = nil
     var onPreview: (MessageAttachment) -> Void
 
+    @State private var hovering = false
+    @State private var copied = false
+
     private var role: MessageRole { message.role }
     private var status: MessageStatus? { message.status }
     private var attachments: [MessageAttachment] { message.attachments }
@@ -96,31 +129,33 @@ struct MessageBubble: View {
             VStack(alignment: role == .user ? .trailing : .leading, spacing: 8) {
                 if !attachments.isEmpty {
                     ForEach(attachments) { attachment in
-                        if let image = AttachmentImage.nsImage(from: attachment) {
-                            Button {
-                                onPreview(attachment)
-                            } label: {
+                        Button {
+                            onPreview(attachment)
+                        } label: {
+                            if let image = AttachmentImage.nsImage(from: attachment) {
                                 Image(nsImage: image)
                                     .resizable()
                                     .scaledToFit()
                                     .frame(maxHeight: 180)
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            } else {
+                                DocumentChipLabel(attachment: attachment)
                             }
-                            .buttonStyle(.plain)
-                            .help("View \(attachment.name)")
                         }
+                        .buttonStyle(.plain)
+                        .help("View \(attachment.name)")
                     }
                 }
                 if role == .user {
-                    Text(message.content)
-                        .font(.system(size: 15, weight: .regular))
+                    SelectableTextView(text: MarkdownTextBuilder.plain(message.content))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    copyRow
                 } else {
                     if status == .streaming, message.content.isEmpty {
                         HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
+                            CueMarkSpin(pointSize: 16, spinning: true, style: .busy)
                             Text(activity ?? "Thinking…")
                                 .font(.system(size: 14))
                                 .foregroundStyle(.secondary)
@@ -142,17 +177,49 @@ struct MessageBubble: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if status == .streaming, !message.content.isEmpty {
-                        Text("▍")
-                            .foregroundStyle(.secondary)
+                        CueMarkSpin(pointSize: 13, spinning: true, style: .busy)
                     }
-                    if let cost = message.costUsd, let timing = message.timing {
-                        Text("\(Pricing.formatUsd(cost)) · \(Pricing.formatLatencyPair(timeToFirstTokenMs: timing.timeToFirstTokenMs, totalMs: timing.totalMs))")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                    if status != .streaming {
+                        HStack(spacing: 10) {
+                            if let cost = message.costUsd, let timing = message.timing {
+                                Text("\(Pricing.formatUsd(cost)) · \(Pricing.formatLatencyPair(timeToFirstTokenMs: timing.timeToFirstTokenMs, totalMs: timing.totalMs))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            copyRow
+                        }
                     }
                 }
             }
             if role != .user { Spacer(minLength: 24) }
         }
+        .background { HoverRegion { hovering = $0 } }
+    }
+
+    /// Copies the message as plain text. Revealed on hover so the reading column stays quiet.
+    private var copyRow: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(message.content, forType: .string)
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.4))
+                copied = false
+            }
+        } label: {
+            Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 11, weight: .medium))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(copied ? Color.green : Color.secondary)
+                .padding(.horizontal, 7)
+                .frame(height: 22)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .background(Color.primary.opacity(hovering ? 0.06 : 0), in: Capsule())
+        .opacity(hovering || copied ? 1 : 0)
+        .animation(.easeInOut(duration: 0.15), value: hovering || copied)
+        .help("Copy message text")
+        .accessibilityLabel("Copy message")
     }
 }

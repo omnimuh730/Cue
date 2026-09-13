@@ -4,6 +4,7 @@ import SwiftUI
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case provider
     case projects
+    case skills
     case listen
     case hotkeys
     case data
@@ -14,6 +15,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .provider: "AI provider"
         case .projects: "Projects"
+        case .skills: "Skills"
         case .listen: "Interview listen"
         case .hotkeys: "Hotkeys"
         case .data: "Data controls"
@@ -24,6 +26,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .provider: "key.fill"
         case .projects: "folder"
+        case .skills: "sparkles"
         case .listen: "waveform"
         case .hotkeys: "keyboard"
         case .data: "lock.shield"
@@ -134,6 +137,7 @@ struct SettingsView: View {
         switch section {
         case .provider: provider
         case .projects: projectsSection
+        case .skills: skillsSection
         case .listen: listen
         case .hotkeys: hotkeys
         case .data: data
@@ -201,6 +205,97 @@ struct SettingsView: View {
         }
     }
 
+    private var skillsSection: some View {
+        let library = session.skills
+        let folder = library.globalRoot.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        return VStack(alignment: .leading, spacing: 14) {
+            CueGlassField(
+                title: "Skill library",
+                help: "Skills are Markdown prompts you invoke by typing / in the composer. Each is `name.md` or `name/SKILL.md`, optionally starting with a front-matter block that sets `name:` and `description:`. Project chats also load `.cue/skills` and `.claude/skills` from the code folder."
+            ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Text(folder)
+                            .font(.system(size: 13, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Button("Open folder") { NSWorkspace.shared.activateFileViewerSelecting([library.globalRoot]) }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                        Button("Reload") { session.refreshSkills() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    Text("""
+                    ---
+                    name: review
+                    description: Review a diff for bugs and risky changes
+                    ---
+                    You are a careful reviewer. For the request below…
+                    """)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .padding(8)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            }
+
+            CueGlassField(title: "Loaded skills") {
+                VStack(alignment: .leading, spacing: 8) {
+                    if library.skills.isEmpty {
+                        Text("No skills yet. Add a Markdown file to \(folder) and it appears here.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(library.skills) { skill in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "sparkles")
+                                .foregroundStyle(.purple)
+                                .frame(width: 18)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text("/\(skill.name)")
+                                        .font(.system(size: 13, weight: .medium))
+                                    if skill.scope == .project {
+                                        Text("project")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1)
+                                            .background(Color.accentColor.opacity(0.16), in: Capsule())
+                                            .foregroundStyle(Color.accentColor)
+                                    }
+                                }
+                                if !skill.description.isEmpty {
+                                    Text(skill.description)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                                Text(skill.sourcePath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer()
+                            Button {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: skill.sourcePath)])
+                            } label: {
+                                Image(systemName: "arrow.up.forward.square")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Reveal in Finder")
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+    }
+
     private var projectsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             CueGlassField(
@@ -246,10 +341,10 @@ struct SettingsView: View {
                 }
             }
 
-            CueGlassField(title: "Project folders", help: "Load a project on a chat to run that thread through Codex in the folder. New chats stay as regular conversations until you load a project on them.") {
+            CueGlassField(title: "Projects", help: "Projects group chats and give them shared instructions and knowledge files. Link a code folder to run a project's chats through Codex inside it.") {
                 VStack(alignment: .leading, spacing: 8) {
                     if session.projects.isEmpty {
-                        Text("No projects yet. Use “Load project” in the sidebar to open a folder.")
+                        Text("No projects yet. Use “New project” in the sidebar.")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                     }
@@ -259,18 +354,26 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(project.name)
                                     .font(.system(size: 13, weight: .medium))
-                                Text(project.folderPath)
+                                Text(project.codeFolder ?? "No code folder · \(project.knowledge.count) knowledge file\(project.knowledge.count == 1 ? "" : "s")")
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                             }
                             Spacer()
-                            Text(project.catalog == nil ? "Not indexed" : "Indexed")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.tertiary)
-                            Button("Re-index") {
-                                session.indexPrompt = project
+                            if project.codeFolder != nil {
+                                Text(project.catalog == nil ? "Not indexed" : "Indexed")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.tertiary)
+                                Button("Re-index") {
+                                    session.indexPrompt = project
+                                    session.settingsOpen = false
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 12, weight: .semibold))
+                            }
+                            Button("Edit") {
+                                session.projectSettingsID = project.identifier
                                 session.settingsOpen = false
                             }
                             .buttonStyle(.plain)

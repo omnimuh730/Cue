@@ -49,6 +49,38 @@ nonisolated enum MarkdownRenderer {
     }
 }
 
+/// Consecutive text blocks render as one selectable text view; Mermaid blocks break the run.
+nonisolated enum MessageSegment: Identifiable, Equatable {
+    case text(id: Int, blocks: [RenderedBlock])
+    case mermaid(id: Int, source: String)
+
+    var id: Int {
+        switch self {
+        case .text(let id, _), .mermaid(let id, _): id
+        }
+    }
+
+    static func group(_ blocks: [RenderedBlock]) -> [MessageSegment] {
+        var segments: [MessageSegment] = []
+        var run: [RenderedBlock] = []
+        func flush() {
+            guard let first = run.first else { return }
+            segments.append(.text(id: first.id, blocks: run))
+            run = []
+        }
+        for block in blocks {
+            if case .mermaid(let source) = block.kind {
+                flush()
+                segments.append(.mermaid(id: block.id, source: source))
+            } else {
+                run.append(block)
+            }
+        }
+        flush()
+        return segments
+    }
+}
+
 struct MarkdownMessageView: View {
     var text: String
     var mermaidAsCode: Bool
@@ -62,21 +94,12 @@ struct MarkdownMessageView: View {
         // already-parsed blocks, so only the trailing block costs anything.
         let shown = blocks.isEmpty ? MarkdownRenderer.render(text, reusing: []) : blocks
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(shown) { block in
-                switch block.kind {
-                case .paragraph(let value):
-                    Text(value)
-                        .font(.system(size: 15.5))
-                        .lineSpacing(6)
-                        .textSelection(.enabled)
-                case .heading(let level, let value):
-                    Text(value)
-                        .font(.system(size: headingSize(level), weight: .semibold))
-                        .padding(.top, level <= 2 ? 6 : 2)
-                        .textSelection(.enabled)
-                case .code(let value):
-                    FencedCodeView(source: value)
-                case .mermaid(let value):
+            ForEach(MessageSegment.group(shown)) { segment in
+                switch segment {
+                case .text(_, let run):
+                    SelectableTextView(text: MarkdownTextBuilder.build(run))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case .mermaid(_, let value):
                     if mermaidAsCode || streaming {
                         MermaidSourceView(source: value)
                     } else {
@@ -91,31 +114,6 @@ struct MarkdownMessageView: View {
             let next = await MarkdownRenderer.renderInBackground(text, reusing: previous)
             if !Task.isCancelled, next != blocks { blocks = next }
         }
-    }
-
-    private func headingSize(_ level: Int) -> CGFloat {
-        switch level {
-        case 1: 22
-        case 2: 19
-        case 3: 17
-        default: 15.5
-        }
-    }
-}
-
-/// Monospace fence body that wraps inside the reading column instead of scrolling sideways.
-struct FencedCodeView: View {
-    var source: String
-
-    var body: some View {
-        Text(source)
-            .font(.system(size: 13, design: .monospaced))
-            .lineSpacing(3)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

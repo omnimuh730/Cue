@@ -12,9 +12,21 @@ Requires **macOS 26.5** (Tahoe) and Xcode 26.
 
 Do not run the nested `Halo/` or `AirScript/` trees as part of this target. They are reference sources only.
 
-## Project mode
+## Files
 
-Open **Load project** in the sidebar (or the workspace switcher → *Open project folder…*) and pick a folder. Chats in that workspace run the [Codex CLI](https://github.com/openai/codex) read-only inside the folder, so answers come from the code. Cue offers to build a small map catalog after opening; skipping is fine — Codex explores on demand.
+Attach PDF, Word, Excel, PowerPoint, images, Markdown, and other text files with the paperclip, by dropping them on the composer, or by pasting a file with ⌘V. PDFs go to OpenAI as-is; Office files are read on your Mac with Apple frameworks (no plugins) and sent as text. Click a chip to preview it.
+
+## Skills
+
+Put Markdown files in `~/.cue/skills/` — either `name.md` or `name/SKILL.md`, optionally starting with a front-matter block that sets `name:` and `description:`. Type `/` in the composer to pick one; it attaches as a chip and the model follows it for that message. Projects with a code folder also pick up `.cue/skills` and `.claude/skills` inside that folder. **Settings → Skills** lists what is loaded.
+
+## Projects
+
+**New project** in the sidebar creates a workspace with its own instructions and knowledge files; chats started inside it use both on every turn. Open the project's settings (slider icon on its row) to edit instructions, add knowledge (drop files or use *Add files…*), or link a code folder.
+
+### Code mode
+
+Link a code folder in project settings (or use *Open code folder* on an empty chat). Chats in that project run the [Codex CLI](https://github.com/openai/codex) read-only inside the folder, so answers come from the code. Cue offers to build a small map catalog after linking; skipping is fine — Codex explores on demand.
 
 Cue looks for `codex` on your PATH, in Homebrew / npm global installs, or inside Halo.app; set an explicit path in **Settings → Projects** if needed (`npm i -g @openai/codex` installs it). The composer's model and thinking effort apply to project chats too.
 

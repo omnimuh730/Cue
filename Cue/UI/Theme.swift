@@ -4,8 +4,9 @@ import SwiftUI
 enum CueTheme {
     static let symbolName = "circle.dashed.inset.filled"
     static let sidebarWidth: CGFloat = 282
-    static let headerHeight: CGFloat = 44
-    static let trafficClearance: CGFloat = 78
+    /// Height of the unified-compact title band; the traffic lights are centered in it.
+    static let headerHeight: CGFloat = 40
+    static let trafficClearance: CGFloat = 84
     static let sidebarInset: CGFloat = 8
     static let readingColumnMax: CGFloat = 800
     static let radiusRow: CGFloat = 8

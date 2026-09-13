@@ -16,12 +16,10 @@ xcodebuild \
   -configuration "$CONFIG" \
   -destination 'platform=macOS' \
   -derivedDataPath "$BUILD/DerivedData" \
-  SYMROOT="$BUILD/Products" \
-  OBJROOT="$BUILD/Intermediates.noindex" \
   build \
   | grep -E "error:|warning: .*Cue/.*\.swift|BUILD" || true
 
-APP="$BUILD/Products/$CONFIG/Cue.app"
+APP="$BUILD/DerivedData/Build/Products/$CONFIG/Cue.app"
 [[ -d "$APP" ]] || { echo "✗ $APP not found; build failed." >&2; exit 1; }
 
 echo "→ Installing to $DEST/Cue.app"

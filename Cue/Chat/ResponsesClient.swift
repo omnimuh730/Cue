@@ -157,7 +157,7 @@ struct ResponsesClient {
     ) async throws {
         var body: [String: Any] = [
             "model": settings.model.rawValue,
-            "instructions": SystemInstruction.buildResponseInstructions(settings.systemInstruction, webSearchEnabled: settings.webSearchEnabled),
+            "instructions": SystemInstruction.buildResponseInstructions(settings.systemInstruction, webSearchEnabled: settings.webSearchEnabled, project: continuation.project),
             "input": toResponseInput(useChain ? (continuation.inputMessages ?? continuation.messages) : continuation.messages),
             "reasoning": ["effort": settings.reasoningEffort.rawValue],
             "store": true,
@@ -181,7 +181,11 @@ struct ResponsesClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        if Task.isCancelled || signal.isCancelled { throw CancellationError() }
+        signal.onCancel { bytes.task.cancel() }
+        if Task.isCancelled || signal.isCancelled {
+            bytes.task.cancel()
+            throw CancellationError()
+        }
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             var message = "OpenAI request failed (\(http.statusCode))."
             var collected = ""
@@ -214,21 +218,37 @@ struct ResponsesClient {
         }
     }
 
-    private func toResponseInput(_ messages: [ChatRequestMessage]) -> [[String: Any]] {
+    /// Images and PDFs go to the model natively; documents, text files, and skills are rendered as
+    /// an `input_text` part ahead of the user's own words.
+    func toResponseInput(_ messages: [ChatRequestMessage]) -> [[String: Any]] {
         messages.map { message in
             if message.role == .assistant || message.attachments.isEmpty {
                 return ["role": message.role.rawValue, "content": message.content]
             }
             var content: [[String: Any]] = []
-            if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                content.append(["type": "input_text", "text": message.content])
+            if let context = AttachmentPrompt.text(for: message.attachments, includePDFText: false) {
+                content.append(["type": "input_text", "text": context])
             }
             for attachment in message.attachments {
-                content.append([
-                    "type": "input_image",
-                    "image_url": attachment.dataURL,
-                    "detail": "auto"
-                ])
+                switch attachment.kind {
+                case .image:
+                    content.append([
+                        "type": "input_image",
+                        "image_url": attachment.dataURL,
+                        "detail": "auto"
+                    ])
+                case .pdf:
+                    content.append([
+                        "type": "input_file",
+                        "filename": attachment.name,
+                        "file_data": attachment.dataURL
+                    ])
+                case .document, .text, .skill:
+                    continue
+                }
+            }
+            if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                content.append(["type": "input_text", "text": message.content])
             }
             if content.isEmpty {
                 content.append(["type": "input_text", "text": ""])
@@ -283,6 +303,7 @@ final class ResponseStreamState {
 final class CancellationToken: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
+    private var handlers: [() -> Void] = []
 
     var isCancelled: Bool {
         lock.lock()
@@ -290,9 +311,28 @@ final class CancellationToken: @unchecked Sendable {
         return cancelled
     }
 
+    /// Runs `handler` immediately if already cancelled, otherwise on the next `cancel()`.
+    func onCancel(_ handler: @escaping () -> Void) {
+        lock.lock()
+        if cancelled {
+            lock.unlock()
+            handler()
+            return
+        }
+        handlers.append(handler)
+        lock.unlock()
+    }
+
     func cancel() {
         lock.lock()
+        guard !cancelled else {
+            lock.unlock()
+            return
+        }
         cancelled = true
+        let handlers = self.handlers
+        self.handlers = []
         lock.unlock()
+        for handler in handlers { handler() }
     }
 }

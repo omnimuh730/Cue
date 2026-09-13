@@ -1,3 +1,5 @@
+import AppKit
+import CoreGraphics
 import Foundation
 import Testing
 @testable import Cue
@@ -131,6 +133,32 @@ struct RemoteAndMarkdownTests {
             .paragraph("After")
         ])
     }
+
+    @Test func mermaidZoomMathClampsAndConverts() {
+        #expect(MermaidZoom.clamp(0.2) == 1)
+        #expect(MermaidZoom.clamp(3) == 3)
+        #expect(MermaidZoom.clamp(50) == MermaidZoom.maxScale)
+        #expect(MermaidZoom.clamp(.nan) == 1)
+
+        // One legacy notch doubles; 200 precise points double; negative halves.
+        #expect(MermaidZoom.factor(forScrollDelta: 20, precise: false) == 2)
+        #expect(MermaidZoom.factor(forScrollDelta: 200, precise: true) == 2)
+        #expect(abs(MermaidZoom.factor(forScrollDelta: -20, precise: false) - 0.5) < 0.0001)
+
+        // Natural scrolling: content down/right (positive deltas) is a negative page scroll, in CSS px.
+        let pan = MermaidZoom.panDelta(scrollDeltaX: 10, scrollDeltaY: -4, magnification: 2)
+        #expect(pan.width == -5)
+        #expect(pan.height == 2)
+
+        // Dragging right/down (flipped view space) keeps content under the cursor: the page scrolls left/up.
+        let anchor = CGPoint(x: 100, y: 80)
+        let target = MermaidZoom.dragScrollTarget(anchorScroll: anchor, start: CGPoint(x: 0, y: 0), current: CGPoint(x: 30, y: 10), magnification: 2)
+        #expect(target.x == 85)
+        #expect(target.y == 75)
+        // Never scrolls past the page origin.
+        let clamped = MermaidZoom.dragScrollTarget(anchorScroll: .zero, start: .zero, current: CGPoint(x: 50, y: 50), magnification: 1)
+        #expect(clamped == .zero)
+    }
 }
 
 struct RenderingAndSummaryTests {
@@ -178,5 +206,53 @@ struct RenderingAndSummaryTests {
         #expect(ThreadSummary.formatTokens(999) == "999")
         #expect(ThreadSummary.formatMs(1500) == "1.5s")
         #expect(ThreadSummary.formatMs(420) == "420ms")
+    }
+}
+
+struct SelectableTextTests {
+    @Test func builderMapsInlineIntentsToFonts() {
+        let blocks = MarkdownRenderer.render("Plain **bold** and *italic* and `code` here", reusing: [])
+        let text = MarkdownTextBuilder.build(blocks)
+        let string = text.string
+        func font(at needle: String) -> NSFont? {
+            guard let range = string.range(of: needle) else { return nil }
+            return text.attribute(.font, at: NSRange(range, in: string).location, effectiveRange: nil) as? NSFont
+        }
+        #expect(string == "Plain bold and italic and code here")
+        #expect(font(at: "bold")?.fontDescriptor.symbolicTraits.contains(.bold) == true)
+        #expect(font(at: "italic")?.fontDescriptor.symbolicTraits.contains(.italic) == true)
+        #expect(font(at: "Plain")?.fontDescriptor.symbolicTraits.contains(.bold) == false)
+        #expect(font(at: "code")?.fontDescriptor.symbolicTraits.contains(.monoSpace) == true)
+    }
+
+    @Test func builderStylesHeadingsAndCodeBlocks() {
+        let blocks = MarkdownRenderer.render("## Title\n\nBody\n\n```swift\nlet a = 1\n```", reusing: [])
+        let text = MarkdownTextBuilder.build(blocks)
+        let string = text.string
+        #expect(string == "Title\nBody\nlet a = 1")
+        let heading = text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        #expect(heading?.pointSize == MarkdownTextBuilder.headingSize(2))
+        let codeLocation = NSRange(string.range(of: "let a")!, in: string).location
+        let style = text.attribute(.paragraphStyle, at: codeLocation, effectiveRange: nil) as? NSParagraphStyle
+        #expect(style?.textBlocks.count == 1)
+        let codeFont = text.attribute(.font, at: codeLocation, effectiveRange: nil) as? NSFont
+        #expect(codeFont?.fontDescriptor.symbolicTraits.contains(.monoSpace) == true)
+        // Plain body paragraphs carry no text block.
+        let bodyLocation = NSRange(string.range(of: "Body")!, in: string).location
+        let bodyStyle = text.attribute(.paragraphStyle, at: bodyLocation, effectiveRange: nil) as? NSParagraphStyle
+        #expect(bodyStyle?.textBlocks.isEmpty == true)
+    }
+
+    @Test func segmentsSplitAtMermaidOnly() {
+        let blocks = MarkdownRenderer.render("Intro\n\n```swift\nx\n```\n\n```mermaid\nflowchart LR\n```\n\nOutro", reusing: [])
+        let segments = MessageSegment.group(blocks)
+        #expect(segments.count == 3)
+        guard case .text(_, let first) = segments[0], case .mermaid(_, let diagram) = segments[1], case .text(_, let last) = segments[2] else {
+            Issue.record("unexpected segment layout")
+            return
+        }
+        #expect(first.count == 2)
+        #expect(diagram == "flowchart LR")
+        #expect(last.count == 1)
     }
 }

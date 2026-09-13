@@ -40,24 +40,43 @@ final class Conversation {
     }
 }
 
-/// A local folder Cue can answer questions about through the Codex CLI.
+/// A workspace: custom instructions, knowledge files, and grouped chats. When `folderPath` is
+/// set, its chats run through the Codex CLI inside that folder; otherwise they use the Responses API.
 @Model
 final class Project {
     @Attribute(.unique) var identifier: UUID
     var name: String
+    /// Linked code folder; empty when the project has no folder.
     var folderPath: String
     var createdAt: Date
     var updatedAt: Date
     /// Map catalog of folders and key files, built when the user chooses to index.
     var catalog: String?
     var catalogAt: Date?
+    /// Per-project system instructions appended after the global one.
+    var instructions: String?
+    /// `[MessageAttachment]` of extracted text (no payloads), sent with every turn.
+    var knowledgeJSON: Data?
 
-    init(identifier: UUID = UUID(), name: String, folderPath: String) {
+    init(identifier: UUID = UUID(), name: String, folderPath: String = "") {
         self.identifier = identifier
         self.name = name
         self.folderPath = folderPath
         self.createdAt = .now
         self.updatedAt = .now
+    }
+
+    var codeFolder: String? {
+        folderPath.isEmpty ? nil : folderPath
+    }
+
+    var knowledge: [MessageAttachment] {
+        get { decode(knowledgeJSON, as: [MessageAttachment].self, decoder: JSONDecoder()) ?? [] }
+        set { knowledgeJSON = newValue.isEmpty ? nil : encode(newValue) }
+    }
+
+    var context: ProjectContext {
+        ProjectContext(name: name, instructions: instructions ?? "", knowledge: knowledge)
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 @MainActor
 @Observable
@@ -128,6 +129,19 @@ final class ListenController {
                 status.downloadProgress = nil
                 status.phase = .armed
                 if !audioRunning {
+                    audio.onStop = { [weak self] error in
+                        Task { @MainActor in
+                            guard let self else { return }
+                            self.audioRunning = false
+                            if self.status.armed {
+                                self.status.error = error.map { "System audio stopped: \($0.localizedDescription)" } ?? "System audio stopped."
+                                self.status.phase = .error
+                                self.status.armed = false
+                                self.status.manualActive = false
+                                self.emit(force: true)
+                            }
+                        }
+                    }
                     try await audio.start { [weak self] pcm, rate in
                         Task { @MainActor in
                             self?.pushPcm(pcm, sampleRate: rate)
@@ -135,8 +149,10 @@ final class ListenController {
                     }
                     audioRunning = true
                 }
+                ListenLog.controller.info("armed: mode=\(settings.listenMode.rawValue, privacy: .public) auto=\(self.status.audioAutoMode)")
                 emit(force: true)
             } catch {
+                ListenLog.controller.error("arm failed: \(error.localizedDescription, privacy: .public)")
                 status.modelReady = false
                 status.error = error.localizedDescription
                 status.phase = .error
@@ -184,10 +200,12 @@ final class ListenController {
         let events = vad.push(resampled, chunkStartAbsolute: chunkStart)
         for event in events {
             switch event {
-            case .speechStart:
+            case .speechStart(let at):
+                ListenLog.controller.debug("speech start @\(at)")
                 status.phase = .listening
                 emit(force: true)
             case .speechEnd(let start, let end):
+                ListenLog.controller.debug("speech end \(start)…\(end) (\((end - start) / 16_000)s)")
                 Task { await enqueueSegment(start: max(start, ring.watermarkSampleIndex), end: end) }
             }
         }
@@ -195,7 +213,10 @@ final class ListenController {
     }
 
     private func enqueueSegment(start: Int, end: Int) async {
-        guard let pcm = ring.slice(startSample: start, endSample: end), pcm.count >= 16_000 * 2 / 5 else { return }
+        guard let pcm = ring.slice(startSample: start, endSample: end), pcm.count >= 16_000 * 2 / 5 else {
+            ListenLog.controller.debug("segment \(start)…\(end) dropped: too short or outside ring")
+            return
+        }
         if queue.count >= 3 { queue.removeFirst() }
         queue.append((pcm, end))
         await drainQueue()
@@ -221,9 +242,12 @@ final class ListenController {
             if !cleaned.isEmpty, cleaned != lastEmittedText {
                 lastEmittedText = cleaned
                 onTranscript?(cleaned)
+            } else if cleaned.isEmpty {
+                ListenLog.controller.info("segment produced no text")
             }
             status.error = nil
         } catch {
+            ListenLog.controller.error("transcription failed: \(error.localizedDescription, privacy: .public)")
             status.error = error.localizedDescription
             status.phase = .error
         }

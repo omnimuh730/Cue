@@ -13,11 +13,18 @@ nonisolated enum SystemInstruction {
         String((value ?? "").prefix(maxCharacters))
     }
 
-    static func buildResponseInstructions(_ systemInstruction: String?, webSearchEnabled: Bool) -> String {
+    /// Global instruction, then the web-search hint, then the project's instructions and knowledge.
+    /// The Responses API does not carry `instructions` across `previous_response_id`, so the full
+    /// block is sent on every turn; `prompt_cache_key` keeps the repeated prefix cheap.
+    static func buildResponseInstructions(_ systemInstruction: String?, webSearchEnabled: Bool, project: ProjectContext? = nil) -> String {
         let custom = (systemInstruction ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = custom.isEmpty ? defaultText : custom
-        guard webSearchEnabled else { return base }
-        if base.lowercased().contains("web search") { return base }
-        return "\(base)\n\n\(webSearchHint)"
+        var text = custom.isEmpty ? defaultText : custom
+        if webSearchEnabled, !text.lowercased().contains("web search") {
+            text += "\n\n\(webSearchHint)"
+        }
+        if let block = project?.promptBlock() {
+            text += "\n\n\(block)"
+        }
+        return text
     }
 }

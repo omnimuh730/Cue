@@ -12,11 +12,76 @@ nonisolated enum MessageStatus: String, Codable, Sendable {
     case error
 }
 
+nonisolated enum AttachmentKind: String, Codable, Sendable {
+    /// Raster image sent as `input_image`.
+    case image
+    /// PDF sent natively as `input_file` (OpenAI); Codex chats get the extracted `text`.
+    case pdf
+    /// Office document (docx / xlsx / pptx / rtf) reduced to extracted `text`.
+    case document
+    /// Plain text or source file; `text` is the file contents.
+    case text
+    /// Skill body attached from the `/` picker; `text` is the skill Markdown.
+    case skill
+}
+
 nonisolated struct MessageAttachment: Identifiable, Codable, Equatable, Sendable {
     var id: String
+    var kind: AttachmentKind
     var mimeType: String
     var name: String
+    /// Base64 data URL for `.image` and `.pdf`; empty for text-only kinds.
     var dataURL: String
+    /// Extracted or literal text for every kind but `.image`.
+    var text: String?
+    var byteCount: Int?
+    /// True when `text` was cut at the importer's size cap.
+    var truncated: Bool
+
+    init(
+        id: String = UUID().uuidString,
+        kind: AttachmentKind = .image,
+        mimeType: String,
+        name: String,
+        dataURL: String = "",
+        text: String? = nil,
+        byteCount: Int? = nil,
+        truncated: Bool = false
+    ) {
+        self.id = id
+        self.kind = kind
+        self.mimeType = mimeType
+        self.name = name
+        self.dataURL = dataURL
+        self.text = text
+        self.byteCount = byteCount
+        self.truncated = truncated
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, mimeType, name, dataURL, text, byteCount, truncated
+    }
+
+    /// Rows written before document attachments existed carry only image fields.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        kind = try container.decodeIfPresent(AttachmentKind.self, forKey: .kind) ?? .image
+        mimeType = try container.decode(String.self, forKey: .mimeType)
+        name = try container.decode(String.self, forKey: .name)
+        dataURL = try container.decodeIfPresent(String.self, forKey: .dataURL) ?? ""
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        byteCount = try container.decodeIfPresent(Int.self, forKey: .byteCount)
+        truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+    }
+
+    var isImage: Bool { kind == .image }
+
+    /// Text the model should read for this attachment (nil for images).
+    var promptText: String? {
+        guard kind != .image else { return nil }
+        return text
+    }
 }
 
 nonisolated struct TokenUsage: Codable, Equatable, Sendable {
@@ -105,6 +170,18 @@ nonisolated struct ChatContinuation: Equatable, Sendable {
     var inputMessages: [ChatRequestMessage]?
     /// Stable per-thread key so OpenAI routes every turn to the same prompt-cache shard.
     var promptCacheKey: String? = nil
+    /// Instructions and knowledge of the project this thread belongs to, if any.
+    var project: ProjectContext? = nil
+}
+
+/// Composer primary action. A live turn never blocks send: typed follow-ups interrupt immediately.
+nonisolated enum ComposerPrimaryAction: Equatable, Sendable {
+    case send
+    case stop
+
+    static func resolve(isStreaming: Bool, hasPayload: Bool) -> ComposerPrimaryAction {
+        isStreaming && !hasPayload ? .stop : .send
+    }
 }
 
 nonisolated enum ChatError: LocalizedError {
@@ -117,7 +194,7 @@ nonisolated enum ChatError: LocalizedError {
         case .missingAPIKey:
             "Add an OpenAI API key in Settings to chat."
         case .emptyMessage:
-            "Type a message or attach an image first."
+            "Type a message or attach a file first."
         case .transport(let message):
             message
         }
