@@ -75,6 +75,7 @@ struct SettingsView: View {
         .onAppear {
             draft = session.settings
             resolvedCodex = CodexBinaryLocator.resolve(override: draft.codexPath)
+            session.hotkeys.refreshPriority()
             apiKey = ""
             clearKey = false
             replacingKey = false
@@ -468,6 +469,28 @@ struct SettingsView: View {
 
     private var hotkeys: some View {
         VStack(alignment: .leading, spacing: 14) {
+            CueGlassField(
+                title: "Priority",
+                help: session.hotkeys.hasPriority
+                    ? "Cue's shortcuts fire before any other app's, even ones that bound the same keys first."
+                    : "With Accessibility granted, Cue's shortcuts fire before any other app's. Until then another app that bound the same keys first can take them."
+            ) {
+                HStack(spacing: 10) {
+                    Image(systemName: session.hotkeys.hasPriority ? "checkmark.seal.fill" : "exclamationmark.triangle")
+                        .foregroundStyle(session.hotkeys.hasPriority ? Color.green : Color.orange)
+                    Text(session.hotkeys.hasPriority ? "Shortcuts take priority over other apps" : "Shortcuts may lose to other apps")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    if !session.hotkeys.hasPriority {
+                        Button("Grant Accessibility") {
+                            AccessibilityTrust.request()
+                            session.hotkeys.refreshPriority()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .semibold))
+                    }
+                }
+            }
             CueGlassToggle(title: "Passive focus", subtitle: "Show Cue without stealing keyboard focus.", isOn: $draft.passiveFocusMode)
             CueGlassToggle(title: "Always on top", isOn: $draft.alwaysOnTop)
             CueGlassField(title: "Opacity") {

@@ -70,32 +70,51 @@ nonisolated final class LiveCaptionAXRunLoop: @unchecked Sendable {
         stopped = nil
     }
 
-    func perform(_ work: @escaping () -> Void) {
-        guard let runLoop = cfRunLoop else { return }
+    /// Queues `work` on the AX thread. Returns `false` when there is no live run loop to take it,
+    /// so a caller waiting on the result can fall back instead of waiting forever.
+    @discardableResult
+    func perform(_ work: @escaping () -> Void) -> Bool {
+        guard let runLoop = cfRunLoop else { return false }
         if isOnAXThread {
             work()
-            return
+            return true
         }
         CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue, work)
         CFRunLoopWakeUp(runLoop)
+        return true
     }
 
-    func performSync<T>(_ work: () -> T) -> T {
+    /// Bound on how long a synchronous hop waits for the AX thread. The loop can be told to stop
+    /// between queueing the block and running it, in which case the block is dropped, so a wait
+    /// with no bound is a wait with no end.
+    static let syncTimeout: DispatchTimeInterval = .seconds(2)
+
+    /// Runs `work` on the AX thread and hands back its result.
+    ///
+    /// `work` has to be escaping: the run loop holds its own reference to the block, and
+    /// releases it some time *after* the block has signalled completion. The earlier
+    /// `withoutActuallyEscaping` version tripped the runtime's escape check on exactly that
+    /// window, taking the app down whenever listen was toggled off while captions were live.
+    func performSync<T>(_ work: @escaping () -> T) -> T {
         if isOnAXThread {
             return work()
         }
-        guard cfRunLoop != nil else {
+        let done = DispatchSemaphore(value: 0)
+        let box = SyncResult<T>()
+        let queued = perform {
+            box.value = work()
+            done.signal()
+        }
+        guard queued, done.wait(timeout: .now() + Self.syncTimeout) == .success, let value = box.value else {
+            // No AX thread to run it, or the loop went away first; the work is teardown-safe
+            // off the AX thread, and doing it here beats never doing it.
             return work()
         }
-        let done = DispatchSemaphore(value: 0)
-        var result: T?
-        withoutActuallyEscaping(work) { escapingWork in
-            perform {
-                result = escapingWork()
-                done.signal()
-            }
-            done.wait()
-        }
-        return result ?? work()
+        return value
     }
+}
+
+/// Mutable slot a block can write into; the semaphore orders the write before the read.
+private final class SyncResult<T>: @unchecked Sendable {
+    var value: T?
 }

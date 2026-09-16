@@ -848,13 +848,27 @@ final class AppSession {
         }
     }
 
-    func addPastedImage(_ image: NSImage) {
+    func addPastedImage(_ image: NSImage, name: String? = nil) {
         guard let dataURL = ImageAttachmentEncoder.jpegDataURL(image, maxDimension: FileAttachmentImporter.maxImageDimension) else { return }
         attachments.append(MessageAttachment(
             mimeType: "image/jpeg",
-            name: "paste-\(Int(Date().timeIntervalSince1970)).jpg",
+            name: name ?? "paste-\(Int(Date().timeIntervalSince1970)).jpg",
             dataURL: dataURL
         ))
+    }
+
+    /// Anything dragged onto the window: files import as usual, raw image data becomes an image
+    /// attachment as if it had been pasted.
+    func acceptDrop(_ providers: [NSItemProvider]) {
+        Task { [weak self] in
+            let payload = await DroppedItems.load(providers)
+            guard let self, !payload.isEmpty else { return }
+            importFiles(payload.urls)
+            for (index, data) in payload.images.enumerated() {
+                guard let image = NSImage(data: data) else { continue }
+                addPastedImage(image, name: "drop-\(Int(Date().timeIntervalSince1970))-\(index + 1).jpg")
+            }
+        }
     }
 
     /// Lands an attachment in the conversation it was picked for, even if the user switched chats meanwhile.

@@ -198,3 +198,31 @@ struct AttachmentTests {
         #expect(bare.hasSuffix("User question:\nPlease read the attached files."))
     }
 }
+
+/// Which representation a ⌘V in the composer picks up.
+struct PasteboardIntentTests {
+    @Test func filesWinOverEverything() {
+        #expect(PasteboardIntent.classify(types: ["public.utf8-plain-text"], hasFiles: true, hasString: true) == .files)
+    }
+
+    @Test func imageWithACaptionStillPastesAsImage() {
+        // A browser's "Copy Image": pixels first, then HTML and the alt text.
+        let types = ["public.tiff", "public.png", "public.html", "public.utf8-plain-text"]
+        #expect(PasteboardIntent.classify(types: types, hasFiles: false, hasString: true) == .image)
+    }
+
+    @Test func screenshotWithNoTextPastesAsImage() {
+        #expect(PasteboardIntent.classify(types: ["public.png"], hasFiles: false, hasString: false) == .image)
+    }
+
+    @Test func spreadsheetCellsPasteAsText() {
+        // Numbers and Excel lead with text and trail a rendered picture of the cells.
+        let types = ["public.utf8-plain-text", "public.html", "public.tiff", "com.adobe.pdf"]
+        #expect(PasteboardIntent.classify(types: types, hasFiles: false, hasString: true) == .text)
+    }
+
+    @Test func plainTextIsText() {
+        #expect(PasteboardIntent.classify(types: ["public.utf8-plain-text"], hasFiles: false, hasString: true) == .text)
+        #expect(PasteboardIntent.classify(types: [], hasFiles: false, hasString: false) == .text)
+    }
+}

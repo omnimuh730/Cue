@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Bindable var session: AppSession
+    @State private var dropTargeted = false
 
     var body: some View {
         ZStack {
@@ -33,6 +34,16 @@ struct RootView: View {
                 }
                 .onChange(of: overlaid, initial: true) { _, isOverlaid in
                     session.setSidebarOverlaid(isOverlaid)
+                }
+            }
+            // The whole window takes a drop, not just the composer's text strip.
+            .onDrop(of: DroppedItems.acceptedTypes, isTargeted: $dropTargeted) { providers in
+                session.acceptDrop(providers)
+                return true
+            }
+            .overlay {
+                if dropTargeted {
+                    DropTargetOverlay()
                 }
             }
             .ignoresSafeArea(edges: .top)
@@ -164,5 +175,25 @@ struct RootView: View {
                 .padding(.bottom, CueTheme.sidebarInset)
                 .shadow(color: .black.opacity(0.3), radius: 24, x: 6)
         }
+    }
+}
+
+/// Shown while a drag hovers over the window so it is obvious the drop will be taken.
+private struct DropTargetOverlay: View {
+    var body: some View {
+        ZStack {
+            Color.accentColor.opacity(0.08)
+            Label("Drop to attach", systemImage: "paperclip")
+                .font(.system(size: 15, weight: .semibold))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .cueGlass(cornerRadius: 16, interactive: false)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                .padding(CueTheme.sidebarInset)
+        }
+        .allowsHitTesting(false)
     }
 }
