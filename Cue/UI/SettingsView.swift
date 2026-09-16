@@ -451,6 +451,11 @@ struct SettingsView: View {
                 subtitle: "Segment speaker audio with VAD. Off means hotkey-only capture.",
                 isOn: $draft.audioAutoMode
             )
+            CueGlassToggle(
+                title: "Insert speech into the draft",
+                subtitle: "Off keeps the composer clean; use the transcript strip or the answer shortcuts instead.",
+                isOn: $draft.captionsToDraft
+            )
             if draft.listenMode == .accessibility {
                 CueGlassField(title: "Accessibility") {
                     VStack(alignment: .leading, spacing: 10) {

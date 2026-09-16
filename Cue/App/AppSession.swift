@@ -165,10 +165,12 @@ final class AppSession {
         reloadConversations()
         listen.configure(settings: settingsStore.settings)
         listen.onTranscript = { [weak self] text in
-            self?.appendDraft(text)
+            guard let self, settings.captionsToDraft else { return }
+            appendDraft(text)
         }
         listen.onCaptionLines = { [weak self] lines in
-            self?.applyCaptionLines(lines)
+            guard let self, settings.captionsToDraft else { return }
+            applyCaptionLines(lines)
         }
         listen.onStatus = { _ in }
         remote.onHotkey = { [weak self] action in
@@ -757,8 +759,15 @@ final class AppSession {
             Task { await listen.listenOff(settings: settings) }
         case .clearAudioCache:
             listen.resetAfterSend()
+            listen.clearTranscript()
             lastCaptionDraft = ""
             draft = ""
+        case .answerLastSentence:
+            answerFromTranscript(sentences: 1)
+        case .answerRecent:
+            answerFromTranscript(sentences: 3)
+        case .answerAll:
+            answerFromTranscript(sentences: 0)
         case .cycleModel:
             let model = ModelCatalog.nextModel(after: settings.model)
             settingsStore.patch { settings in
@@ -887,6 +896,35 @@ final class AppSession {
             let parked = parkedDrafts[conversationID] ?? ("", [])
             parkedDrafts[conversationID] = (parked.draft, parked.attachments + [attachment])
         }
+    }
+
+    // MARK: - Transcript
+
+    /// Sends the most recent `sentences` sentences heard (0 = everything not yet answered) as a
+    /// question. Whatever was typed in the composer is parked around the send so it survives;
+    /// attachments go with the question, since a screenshot taken for it is the usual reason
+    /// one is there.
+    func answerFromTranscript(sentences: Int) {
+        guard let question = listen.transcript.question(sentences: sentences) else {
+            remoteNotice = listen.transcript.isEmpty ? "Nothing heard yet." : "Nothing new to answer."
+            return
+        }
+        let typed = draft
+        draft = question
+        lastCaptionDraft = ""
+        send()
+        listen.markTranscriptAnswered()
+        // `send` only clears the draft when it actually sent (a missing API key opens Settings).
+        if draft.isEmpty, !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, typed != question {
+            draft = typed
+        }
+    }
+
+    /// Appends a heard line to the draft so it can be edited before sending.
+    func quoteTranscript(_ line: CaptionLine) {
+        let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        appendDraft(text)
     }
 
     // MARK: - Draft input

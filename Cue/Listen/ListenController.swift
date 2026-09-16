@@ -18,6 +18,8 @@ final class ListenController {
     private var lastStatusEmit = Date.distantPast
 
     var status = ListenStatus.idle
+    /// Everything heard this session; kept across sends so the strip shows what was answered.
+    private(set) var transcript = TranscriptLog()
     var onTranscript: ((String) -> Void)?
     var onCaptionLines: (([CaptionLine]) -> Void)?
     var onStatus: ((ListenStatus) -> Void)?
@@ -75,6 +77,14 @@ final class ListenController {
         status.manualActive = false
         emit(force: true)
         await enqueueSegment(start: start, end: end)
+    }
+
+    func clearTranscript() {
+        transcript.clear()
+    }
+
+    func markTranscriptAnswered() {
+        transcript.markAnswered()
     }
 
     func resetAfterSend() {
@@ -177,6 +187,7 @@ final class ListenController {
     private func ingestCaptions(_ raw: String) {
         guard assembler.ingest(raw) else { return }
         status.phase = .listening
+        transcript.mirror(assembler.lines)
         onCaptionLines?(assembler.lines)
         emit(force: true)
     }
@@ -241,6 +252,7 @@ final class ListenController {
             let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleaned.isEmpty, cleaned != lastEmittedText {
                 lastEmittedText = cleaned
+                transcript.append(cleaned)
                 onTranscript?(cleaned)
             } else if cleaned.isEmpty {
                 ListenLog.controller.info("segment produced no text")
