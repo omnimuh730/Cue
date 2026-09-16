@@ -10,6 +10,8 @@ import SwiftUI
 struct CodeBlockView: View {
     var language: String
     var source: String
+    /// Syntax runs from `CodeHighlighter`; empty draws the block in one color.
+    var spans: [HighlightSpan] = []
 
     @State private var hovering = false
 
@@ -20,7 +22,7 @@ struct CodeBlockView: View {
 
     var body: some View {
         CodeBlockFrame(title: title, source: source, hovering: $hovering) {
-            NumberedCodeView(text: MarkdownTextBuilder.code(source))
+            NumberedCodeView(text: MarkdownTextBuilder.code(source, spans: spans))
                 .padding(.trailing, CueTheme.Spacing.sm)
                 .padding(.vertical, 10)
         }

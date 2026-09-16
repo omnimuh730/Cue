@@ -1,13 +1,25 @@
 import AppKit
 import SwiftUI
 
+nonisolated struct RenderedListItem: Equatable, Sendable {
+    var level: Int
+    var marker: String
+    var text: AttributedString
+}
+
 /// A block with its inline Markdown already parsed, ready to draw without further work.
 nonisolated struct RenderedBlock: Identifiable, Equatable, Sendable {
     nonisolated enum Kind: Equatable, Sendable {
         case paragraph(AttributedString)
         case heading(level: Int, AttributedString)
-        case code(language: String, String)
+        /// Fenced code with its syntax spans, tokenized once here so the view only colors.
+        case code(language: String, String, spans: [HighlightSpan])
         case mermaid(String)
+        case list(ordered: Bool, items: [RenderedListItem])
+        /// One entry per quote paragraph.
+        case blockquote([AttributedString])
+        case table(header: [AttributedString], alignments: [TableAlignment], rows: [[AttributedString]])
+        case rule
     }
 
     /// Position in the message; stable while streaming appends, so earlier views are reused.
@@ -37,9 +49,25 @@ nonisolated enum MarkdownRenderer {
         switch block {
         case .paragraph(let value): .paragraph(parse(value))
         case .heading(let level, let value): .heading(level: level, parse(value))
-        case .code(let language, let value): .code(language: language, value)
+        case .code(let language, let value):
+            .code(language: language, value, spans: CodeHighlighter.spans(value, language: language))
         case .mermaid(let value): .mermaid(value)
+        case .list(let ordered, let items):
+            // Wrapped lines stay inside the item's paragraph so the hanging indent holds.
+            .list(ordered: ordered, items: items.map {
+                RenderedListItem(level: $0.level, marker: $0.marker, text: parse(softWrapped($0.text)))
+            })
+        case .blockquote(let value):
+            .blockquote(value.components(separatedBy: "\n\n").map { parse(softWrapped($0)) })
+        case .table(let header, let alignments, let rows):
+            .table(header: header.map { parse($0) }, alignments: alignments, rows: rows.map { $0.map { parse($0) } })
+        case .rule: .rule
         }
+    }
+
+    /// Newlines become line separators: a break within the paragraph rather than a new one.
+    private static func softWrapped(_ text: String) -> String {
+        text.replacingOccurrences(of: "\n", with: "\u{2028}")
     }
 
     private static func parse(_ markdown: String) -> AttributedString {
@@ -54,12 +82,12 @@ nonisolated enum MarkdownRenderer {
 /// run so each can carry its own frame and copy button.
 nonisolated enum MessageSegment: Identifiable, Equatable {
     case text(id: Int, blocks: [RenderedBlock])
-    case code(id: Int, language: String, source: String)
+    case code(id: Int, language: String, source: String, spans: [HighlightSpan])
     case mermaid(id: Int, source: String)
 
     var id: Int {
         switch self {
-        case .text(let id, _), .code(let id, _, _), .mermaid(let id, _): id
+        case .text(let id, _), .code(let id, _, _, _), .mermaid(let id, _): id
         }
     }
 
@@ -76,10 +104,10 @@ nonisolated enum MessageSegment: Identifiable, Equatable {
             case .mermaid(let source):
                 flush()
                 segments.append(.mermaid(id: block.id, source: source))
-            case .code(let language, let source):
+            case .code(let language, let source, let spans):
                 flush()
-                segments.append(.code(id: block.id, language: language, source: source))
-            case .paragraph, .heading:
+                segments.append(.code(id: block.id, language: language, source: source, spans: spans))
+            case .paragraph, .heading, .list, .blockquote, .table, .rule:
                 run.append(block)
             }
         }
@@ -93,7 +121,7 @@ nonisolated enum MessageSegment: Identifiable, Equatable {
 struct MessagePiece: Identifiable {
     enum Body {
         case text(NSAttributedString)
-        case code(language: String, source: String)
+        case code(language: String, source: String, spans: [HighlightSpan])
         case mermaid(String)
     }
 
@@ -120,13 +148,13 @@ struct MarkdownDocument {
                 let value = MarkdownTextBuilder.build(run)
                 pieces.append(MessagePiece(id: id, offset: offset, length: value.length, body: .text(value)))
                 offset += value.length
-            case .code(let id, let language, let source):
+            case .code(let id, let language, let source, let spans):
                 pieces.append(
                     MessagePiece(
                         id: id,
                         offset: offset,
                         length: source.utf16.count,
-                        body: .code(language: language, source: source)
+                        body: .code(language: language, source: source, spans: spans)
                     )
                 )
                 offset += source.utf16.count
@@ -241,11 +269,11 @@ struct MarkdownMessageView: View {
                 case .text(let value):
                     SelectableTextView(text: value, reveal: reveal(for: piece))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                case .code(let language, let source):
+                case .code(let language, let source, let spans):
                     // A block below the reveal head has not "arrived" yet; showing it early would
                     // run ahead of the prose wiping in above it.
                     if hasReached(piece) {
-                        CodeBlockView(language: language, source: source)
+                        CodeBlockView(language: language, source: source, spans: spans)
                     }
                 case .mermaid(let source):
                     if hasReached(piece) {
@@ -337,90 +365,5 @@ struct MarkdownMessageView: View {
 private extension MarkdownDocument {
     func matches(text other: String, mermaidAsCode flag: Bool) -> Bool {
         !pieces.isEmpty && text == other && mermaidAsCode == flag
-    }
-}
-
-nonisolated enum MarkdownBlock: Hashable, Sendable {
-    case paragraph(String)
-    case heading(level: Int, String)
-    case code(language: String, String)
-    case mermaid(String)
-}
-
-/// Splits assistant Markdown into fenced code, Mermaid, heading, and paragraph blocks.
-/// Inline formatting inside paragraphs is left to `AttributedString(markdown:)`.
-nonisolated enum MarkdownBlocks {
-    static func split(_ text: String) -> [MarkdownBlock] {
-        var blocks: [MarkdownBlock] = []
-        var paragraph: [String] = []
-        var fence: (language: String, lines: [String])?
-
-        func flushParagraph() {
-            let joined = paragraph.joined(separator: "\n")
-            if !joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                blocks.append(.paragraph(joined))
-            }
-            paragraph = []
-        }
-
-        for rawLine in text.components(separatedBy: "\n") {
-            let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if var open = fence {
-                if trimmed.hasPrefix("```") {
-                    blocks.append(fenceBlock(open))
-                    fence = nil
-                } else {
-                    open.lines.append(line)
-                    fence = open
-                }
-                continue
-            }
-
-            if trimmed.hasPrefix("```") {
-                flushParagraph()
-                let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces).lowercased()
-                fence = (language, [])
-                continue
-            }
-
-            if let heading = heading(from: trimmed) {
-                flushParagraph()
-                blocks.append(.heading(level: heading.level, heading.text))
-                continue
-            }
-
-            if trimmed.isEmpty {
-                flushParagraph()
-            } else {
-                paragraph.append(line)
-            }
-        }
-
-        if let open = fence {
-            blocks.append(fenceBlock(open))
-        }
-        flushParagraph()
-        return blocks
-    }
-
-    private static func fenceBlock(_ fence: (language: String, lines: [String])) -> MarkdownBlock {
-        let body = fence.lines.joined(separator: "\n").trimmingCharacters(in: .newlines)
-        if fence.language == "mermaid" { return .mermaid(body) }
-        return .code(language: fence.language, body)
-    }
-
-    private static func heading(from line: String) -> (level: Int, text: String)? {
-        var level = 0
-        var index = line.startIndex
-        while index < line.endIndex, line[index] == "#", level < 6 {
-            level += 1
-            index = line.index(after: index)
-        }
-        guard level > 0, index < line.endIndex, line[index] == " " else { return nil }
-        let text = line[index...].trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return nil }
-        return (level, text)
     }
 }
