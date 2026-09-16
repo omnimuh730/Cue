@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// A block with its inline Markdown already parsed, ready to draw without further work.
@@ -5,7 +6,7 @@ nonisolated struct RenderedBlock: Identifiable, Equatable, Sendable {
     nonisolated enum Kind: Equatable, Sendable {
         case paragraph(AttributedString)
         case heading(level: Int, AttributedString)
-        case code(String)
+        case code(language: String, String)
         case mermaid(String)
     }
 
@@ -36,7 +37,7 @@ nonisolated enum MarkdownRenderer {
         switch block {
         case .paragraph(let value): .paragraph(parse(value))
         case .heading(let level, let value): .heading(level: level, parse(value))
-        case .code(_, let value): .code(value)
+        case .code(let language, let value): .code(language: language, value)
         case .mermaid(let value): .mermaid(value)
         }
     }
@@ -49,14 +50,16 @@ nonisolated enum MarkdownRenderer {
     }
 }
 
-/// Consecutive text blocks render as one selectable text view; Mermaid blocks break the run.
+/// Consecutive prose blocks render as one selectable text view; code and Mermaid blocks break the
+/// run so each can carry its own frame and copy button.
 nonisolated enum MessageSegment: Identifiable, Equatable {
     case text(id: Int, blocks: [RenderedBlock])
+    case code(id: Int, language: String, source: String)
     case mermaid(id: Int, source: String)
 
     var id: Int {
         switch self {
-        case .text(let id, _), .mermaid(let id, _): id
+        case .text(let id, _), .code(let id, _, _), .mermaid(let id, _): id
         }
     }
 
@@ -69,10 +72,14 @@ nonisolated enum MessageSegment: Identifiable, Equatable {
             run = []
         }
         for block in blocks {
-            if case .mermaid(let source) = block.kind {
+            switch block.kind {
+            case .mermaid(let source):
                 flush()
                 segments.append(.mermaid(id: block.id, source: source))
-            } else {
+            case .code(let language, let source):
+                flush()
+                segments.append(.code(id: block.id, language: language, source: source))
+            case .paragraph, .heading:
                 run.append(block)
             }
         }
@@ -81,39 +88,255 @@ nonisolated enum MessageSegment: Identifiable, Equatable {
     }
 }
 
+/// One drawable piece of a message with its position in the message's character stream, so the
+/// streaming reveal can be spread across pieces.
+struct MessagePiece: Identifiable {
+    enum Body {
+        case text(NSAttributedString)
+        case code(language: String, source: String)
+        case mermaid(String)
+    }
+
+    var id: Int
+    var offset: Int
+    var length: Int
+    var body: Body
+}
+
+/// A message's Markdown, parsed and laid out into pieces once.
+struct MarkdownDocument {
+    var text = ""
+    var mermaidAsCode = false
+    var blocks: [RenderedBlock] = []
+    var pieces: [MessagePiece] = []
+    var length = 0
+
+    static func make(text: String, mermaidAsCode: Bool, blocks: [RenderedBlock]) -> MarkdownDocument {
+        var pieces: [MessagePiece] = []
+        var offset = 0
+        for segment in MessageSegment.group(blocks) {
+            switch segment {
+            case .text(let id, let run):
+                let value = MarkdownTextBuilder.build(run)
+                pieces.append(MessagePiece(id: id, offset: offset, length: value.length, body: .text(value)))
+                offset += value.length
+            case .code(let id, let language, let source):
+                pieces.append(
+                    MessagePiece(
+                        id: id,
+                        offset: offset,
+                        length: source.utf16.count,
+                        body: .code(language: language, source: source)
+                    )
+                )
+                offset += source.utf16.count
+            case .mermaid(let id, let source):
+                pieces.append(MessagePiece(id: id, offset: offset, length: source.utf16.count, body: .mermaid(source)))
+                offset += source.utf16.count
+            }
+        }
+        return MarkdownDocument(text: text, mermaidAsCode: mermaidAsCode, blocks: blocks, pieces: pieces, length: offset)
+    }
+}
+
+/// Keeps parsed messages around after their views are recycled.
+///
+/// A `LazyVStack` tears down and rebuilds bubbles as the transcript scrolls; without this, every
+/// bubble that scrolls back into view re-parses its Markdown and rebuilds its attributed text on
+/// the main thread, which is what makes a long transcript stutter and flash empty.
+@MainActor
+final class MarkdownDocumentStore {
+    static let shared = MarkdownDocumentStore()
+
+    /// Roughly a screen or two of history in either direction.
+    private let limit = 48
+    private var documents: [UUID: MarkdownDocument] = [:]
+    private var reveals: [UUID: Double] = [:]
+    private var order: [UUID] = []
+
+    func document(for id: UUID, text: String, mermaidAsCode: Bool) -> MarkdownDocument? {
+        guard let cached = documents[id], cached.text == text, cached.mermaidAsCode == mermaidAsCode else { return nil }
+        touch(id)
+        return cached
+    }
+
+    func store(_ document: MarkdownDocument, for id: UUID) {
+        documents[id] = document
+        touch(id)
+    }
+
+    func reveal(for id: UUID) -> Double? { reveals[id] }
+
+    func store(reveal: Double, for id: UUID) {
+        reveals[id] = reveal
+    }
+
+    func forget(_ id: UUID) {
+        documents[id] = nil
+        reveals[id] = nil
+        order.removeAll { $0 == id }
+    }
+
+    private func touch(_ id: UUID) {
+        order.removeAll { $0 == id }
+        order.append(id)
+        while order.count > limit, let oldest = order.first {
+            order.removeFirst()
+            documents[oldest] = nil
+            reveals[oldest] = nil
+        }
+    }
+}
+
+/// Paces the streaming reveal: the head chases the text that has arrived, fast enough never to
+/// fall behind and slow enough that characters land one at a time instead of in 40 ms slabs.
+nonisolated enum RevealPacing {
+    static let frameInterval: Duration = .milliseconds(16)
+    /// Fraction of the backlog consumed per frame. Settles ~0.15 s behind a live stream.
+    static let catchUp: Double = 0.14
+    /// Floor so a trickle still moves, in characters per frame.
+    static let minimumStep: Double = 0.7
+    /// Past this backlog the reveal stops animating and jumps; the reader is too far behind to care.
+    static let jumpThreshold: Double = 1_400
+
+    static func advance(_ shown: Double, toward target: Double) -> Double {
+        let remaining = target - shown
+        guard remaining > 0 else { return target }
+        if remaining > jumpThreshold { return target }
+        return min(target, shown + max(minimumStep, remaining * catchUp))
+    }
+}
+
 struct MarkdownMessageView: View {
+    /// Identifies the message so its parsed text survives `LazyVStack` recycling.
+    var messageID: UUID
     var text: String
     var mermaidAsCode: Bool
     /// While the turn is still streaming, Mermaid fences stay as source (the fence may be incomplete).
     var streaming: Bool = false
-    @State private var blocks: [RenderedBlock] = []
+
+    @State private var document = MarkdownDocument()
+    /// Characters revealed so far; `.infinity` means "all of it", the state for finished messages.
+    @State private var revealed: Double
+    @State private var revealing: Bool
+
+    init(messageID: UUID, text: String, mermaidAsCode: Bool, streaming: Bool = false) {
+        self.messageID = messageID
+        self.text = text
+        self.mermaidAsCode = mermaidAsCode
+        self.streaming = streaming
+        // Resolved here rather than in `onAppear` so a bubble never paints its full text for one
+        // frame before the wipe starts. A recycled view picks up where its reveal left off.
+        let resumed = MarkdownDocumentStore.shared.reveal(for: messageID)
+        let start = resumed ?? (streaming ? 0 : .infinity)
+        _revealed = State(initialValue: start)
+        _revealing = State(initialValue: streaming || start.isFinite)
+    }
 
     var body: some View {
-        // First appearance parses synchronously so a bubble never flashes empty; from then on
-        // every update (each streaming flush) is parsed off the main thread and reuses
-        // already-parsed blocks, so only the trailing block costs anything.
-        let shown = blocks.isEmpty ? MarkdownRenderer.render(text, reusing: []) : blocks
+        let shown = visibleDocument
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(MessageSegment.group(shown)) { segment in
-                switch segment {
-                case .text(_, let run):
-                    SelectableTextView(text: MarkdownTextBuilder.build(run))
+            ForEach(shown.pieces) { piece in
+                switch piece.body {
+                case .text(let value):
+                    SelectableTextView(text: value, reveal: reveal(for: piece))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                case .mermaid(_, let value):
-                    if mermaidAsCode || streaming {
-                        MermaidSourceView(source: value)
-                    } else {
-                        MermaidBlockView(source: value)
+                case .code(let language, let source):
+                    // A block below the reveal head has not "arrived" yet; showing it early would
+                    // run ahead of the prose wiping in above it.
+                    if hasReached(piece) {
+                        CodeBlockView(language: language, source: source)
+                    }
+                case .mermaid(let source):
+                    if hasReached(piece) {
+                        if mermaidAsCode || streaming {
+                            CodeBlockView(language: "mermaid", source: source)
+                        } else {
+                            MermaidBlockView(source: source)
+                        }
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: text) {
-            let previous = blocks.isEmpty ? shown : blocks
-            let next = await MarkdownRenderer.renderInBackground(text, reusing: previous)
-            if !Task.isCancelled, next != blocks { blocks = next }
+        .task(id: text) { await reparse() }
+        .task(id: [revealing, streaming]) { await runReveal() }
+        .onChange(of: streaming) { _, isStreaming in
+            if isStreaming { revealing = true }
         }
+        .onDisappear { MarkdownDocumentStore.shared.store(reveal: revealed, for: messageID) }
+    }
+
+    /// The parsed text to draw right now.
+    ///
+    /// Parsing the current text inline happens only when there is nothing at all to show, so a
+    /// bubble never flashes empty. Once anything is parsed, a flush that has not been reparsed
+    /// yet keeps drawing the previous pass: the background reparse lands within a frame or two,
+    /// and the reveal head trails further behind than that in any case.
+    private var visibleDocument: MarkdownDocument {
+        if document.matches(text: text, mermaidAsCode: mermaidAsCode) { return document }
+        let store = MarkdownDocumentStore.shared
+        if let cached = store.document(for: messageID, text: text, mermaidAsCode: mermaidAsCode) { return cached }
+        if !document.pieces.isEmpty { return document }
+        let made = MarkdownDocument.make(
+            text: text,
+            mermaidAsCode: mermaidAsCode,
+            blocks: MarkdownRenderer.render(text, reusing: [])
+        )
+        store.store(made, for: messageID)
+        return made
+    }
+
+    /// Whether the reveal has reached a piece that is drawn whole rather than character by
+    /// character.
+    private func hasReached(_ piece: MessagePiece) -> Bool {
+        revealed >= Double(piece.offset)
+    }
+
+    /// Characters of this piece to show, or `nil` once the reveal has passed it entirely.
+    private func reveal(for piece: MessagePiece) -> Int? {
+        guard revealed.isFinite else { return nil }
+        let local = revealed - Double(piece.offset)
+        if local >= Double(piece.length) { return nil }
+        return max(0, Int(local))
+    }
+
+    private func reparse() async {
+        if let cached = MarkdownDocumentStore.shared.document(for: messageID, text: text, mermaidAsCode: mermaidAsCode) {
+            document = cached
+            return
+        }
+        let blocks = await MarkdownRenderer.renderInBackground(text, reusing: document.blocks)
+        guard !Task.isCancelled else { return }
+        let next = MarkdownDocument.make(text: text, mermaidAsCode: mermaidAsCode, blocks: blocks)
+        MarkdownDocumentStore.shared.store(next, for: messageID)
+        document = next
+        if revealed.isFinite, revealed < Double(next.length) { revealing = true }
+    }
+
+    /// Runs only while there is something left to wipe in, so a quiet transcript costs no frames.
+    private func runReveal() async {
+        guard revealing else { return }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: RevealPacing.frameInterval)
+            if Task.isCancelled { return }
+            let target = Double(document.length)
+            let next = RevealPacing.advance(min(revealed, target), toward: target)
+            revealed = next
+            MarkdownDocumentStore.shared.store(reveal: next, for: messageID)
+            if !streaming, next >= target {
+                revealed = .infinity
+                MarkdownDocumentStore.shared.store(reveal: .infinity, for: messageID)
+                revealing = false
+                return
+            }
+        }
+    }
+}
+
+private extension MarkdownDocument {
+    func matches(text other: String, mermaidAsCode flag: Bool) -> Bool {
+        !pieces.isEmpty && text == other && mermaidAsCode == flag
     }
 }
 

@@ -8,6 +8,11 @@ enum CueTheme {
     static let headerHeight: CGFloat = 40
     static let trafficClearance: CGFloat = 84
     static let sidebarInset: CGFloat = 8
+    /// Narrower than this and the sidebar would squeeze the transcript into a column too thin to
+    /// read, so it floats over the chat instead of sitting beside it.
+    static let sidebarSplitMinWidth: CGFloat = 700
+    /// Kept clear to the right of a floating sidebar so the chat behind it stays visible.
+    static let sidebarOverlayGutter: CGFloat = 52
     static let readingColumnMax: CGFloat = 800
     static let radiusRow: CGFloat = 8
     static let radiusPanel: CGFloat = 16

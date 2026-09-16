@@ -21,6 +21,7 @@ struct SearchView: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 12, weight: .semibold))
                             .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .cueGlass(cornerRadius: 14, interactive: true)
@@ -41,6 +42,7 @@ struct SearchView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 10)
+                                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
                             .buttonStyle(.plain)
                             .cueGlass(cornerRadius: 12, interactive: true)

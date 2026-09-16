@@ -9,8 +9,16 @@ private final class ChatScrollFollowBox {
 struct ChatView: View {
     @Bindable var session: AppSession
     @State private var followBox = ChatScrollFollowBox()
+    /// Older turns beyond `historyWindow` stay out of the layout until asked for.
+    @State private var historyExpanded = false
 
+    private static let topAnchor = "chat-top"
     private static let bottomAnchor = "chat-bottom"
+    /// Turns laid out eagerly. Every bubble in the window is a live text view, so this caps the
+    /// cost of opening a long thread; anything older is one click away.
+    static let historyWindow = 80
+
+    private var readingOrder: ReadingOrder { session.settings.readingOrder }
 
     var body: some View {
         let messages = session.activeMessages
@@ -48,10 +56,24 @@ struct ChatView: View {
     }
 
     private var transcript: some View {
-        ScrollViewReader { proxy in
+        let all = session.activeMessages
+        let hidden = historyExpanded ? 0 : max(0, all.count - Self.historyWindow)
+        let shown = readingOrder.arrange(Array(all.dropFirst(hidden)), isUser: { $0.role == .user })
+        return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 28) {
-                    ForEach(session.activeMessages, id: \.identifier) { message in
+                // A plain VStack, deliberately. `LazyVStack` estimates the height of every bubble
+                // it has not built yet, and the estimates are wrong for text views: the scroll
+                // thumb jumped as bubbles materialised, `scrollTo` landed short, and the reader
+                // saw blank space while the lazy rows caught up. With the parsed text cached and
+                // the window capped, laying every bubble out once is cheaper than that.
+                VStack(alignment: .leading, spacing: 28) {
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.topAnchor)
+                    if hidden > 0, readingOrder == .newestAtBottom {
+                        earlierMessagesButton(hidden)
+                    }
+                    ForEach(shown, id: \.identifier) { message in
                         MessageBubble(
                             message: message,
                             mermaidAsCode: session.mermaidAsCode,
@@ -59,6 +81,9 @@ struct ChatView: View {
                             onPreview: { session.previewAttachment = $0 }
                         )
                         .id(message.identifier)
+                    }
+                    if hidden > 0, readingOrder == .newestAtTop {
+                        earlierMessagesButton(hidden)
                     }
                     Color.clear
                         .frame(height: 1)
@@ -70,23 +95,39 @@ struct ChatView: View {
                 .padding(.top, CueTheme.Spacing.md)
                 .padding(.bottom, CueTheme.Spacing.lg)
             }
+            .defaultScrollAnchor(readingOrder == .newestAtBottom ? .bottom : .top, for: .initialOffset)
             .onScrollGeometryChange(for: ChatScrollSnapshot.self) { geometry in
                 ChatScrollSnapshot(
                     contentHeight: geometry.contentSize.height,
                     visibleMaxY: geometry.visibleRect.maxY
                 )
             } action: { _, snapshot in
+                guard readingOrder == .newestAtBottom else { return }
                 if followBox.follow.apply(snapshot) {
                     scrollToLatest(proxy)
                 }
             }
-            .onChange(of: session.activeMessages.count) { previous, next in
+            // Geometry cannot separate a slow drag from streaming growth. While the reader is on
+            // the scroll view, follow stands down; letting go at the bottom resumes it.
+            .onScrollPhaseChange { _, phase in
+                // `.animating` is Cue's own scrollTo, not the reader.
+                let driving = phase == .tracking || phase == .interacting || phase == .decelerating
+                if followBox.follow.setInteracting(driving), readingOrder == .newestAtBottom {
+                    scrollToLatest(proxy)
+                }
+            }
+            .onChange(of: all.count) { previous, next in
                 if next > previous {
                     followBox.follow.jumpToLatest()
                 }
                 scrollToLatest(proxy)
             }
             .onChange(of: session.activeID) { _, _ in
+                historyExpanded = false
+                followBox.follow.jumpToLatest()
+                scrollToLatest(proxy)
+            }
+            .onChange(of: readingOrder) { _, _ in
                 followBox.follow.jumpToLatest()
                 scrollToLatest(proxy)
             }
@@ -97,12 +138,32 @@ struct ChatView: View {
         }
     }
 
+    private func earlierMessagesButton(_ count: Int) -> some View {
+        Button {
+            historyExpanded = true
+        } label: {
+            Label("Show \(count) earlier \(count == 1 ? "message" : "messages")", systemImage: "clock.arrow.circlepath")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .cueGlass(cornerRadius: 14, interactive: true)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Where a new turn lives: the bottom in chat order, the top in prompter order.
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
         guard followBox.follow.shouldFollow else { return }
         var transaction = Transaction()
         transaction.animation = nil
         withTransaction(transaction) {
-            proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+            switch readingOrder {
+            case .newestAtBottom: proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+            case .newestAtTop: proxy.scrollTo(Self.topAnchor, anchor: .top)
+            }
         }
     }
 }
@@ -170,6 +231,7 @@ struct MessageBubble: View {
                             .textSelection(.enabled)
                     } else {
                         MarkdownMessageView(
+                            messageID: message.identifier,
                             text: message.content,
                             mermaidAsCode: mermaidAsCode,
                             streaming: status == .streaming

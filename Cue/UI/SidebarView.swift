@@ -68,6 +68,7 @@ struct SidebarView: View {
             Spacer()
             Button {
                 session.newChat()
+                session.dismissSidebarIfOverlaid()
             } label: {
                 Image(systemName: "square.and.pencil")
                     .font(.system(size: 13, weight: .semibold))
@@ -105,6 +106,7 @@ struct SidebarView: View {
         return HStack(spacing: 0) {
             Button {
                 session.selectWorkspace(id)
+                session.dismissSidebarIfOverlaid()
             } label: {
                 HStack(spacing: 8) {
                     if let project {
@@ -196,6 +198,7 @@ struct SidebarView: View {
         return HStack(spacing: 0) {
             Button {
                 session.select(conversation.identifier)
+                session.dismissSidebarIfOverlaid()
             } label: {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 1) {

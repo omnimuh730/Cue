@@ -48,6 +48,10 @@ final class AppSession {
     var draft = ""
     var attachments: [MessageAttachment] = []
     var sidebarOpen = true
+    /// True when the window is too narrow to sit the sidebar beside the chat, so it floats over it.
+    private(set) var sidebarOverlaid = false
+    /// What the sidebar was doing in the wide layout, restored when the window widens again.
+    private var sidebarOpenWhenSplit = true
     var settingsOpen = false
     var searchOpen = false
     var previewAttachment: MessageAttachment?
@@ -231,6 +235,24 @@ final class AppSession {
         applyWindowChrome()
     }
 
+    /// Switches the sidebar between sitting beside the chat and floating over it. A floating
+    /// sidebar covers the transcript, so it starts closed and the user opens it deliberately.
+    func setSidebarOverlaid(_ value: Bool) {
+        guard sidebarOverlaid != value else { return }
+        sidebarOverlaid = value
+        if value {
+            sidebarOpenWhenSplit = sidebarOpen
+            sidebarOpen = false
+        } else {
+            sidebarOpen = sidebarOpenWhenSplit
+        }
+    }
+
+    /// Dismisses a floating sidebar after it has been used; a docked one stays put.
+    func dismissSidebarIfOverlaid() {
+        if sidebarOverlaid { sidebarOpen = false }
+    }
+
     // MARK: - Conversations
 
     /// New chat in the selected workspace (or Personal when no project is selected).
@@ -239,11 +261,28 @@ final class AppSession {
     }
 
     func newChat(in projectID: UUID?) {
+        // Pressing "New chat" from an empty chat should stay put rather than stack up blank
+        // threads the user then has to delete. Staying put also keeps whatever is half-typed.
+        if let active = activeConversation, isBlank(active), active.projectID == projectID { return }
+        if let blank = blankConversation(in: projectID) {
+            select(blank.identifier)
+            return
+        }
         let conversation = Conversation(projectID: projectID)
         container.mainContext.insert(conversation)
         save()
         reloadConversations()
         select(conversation.identifier)
+    }
+
+    /// A chat with no turns in it and nothing in flight.
+    private func isBlank(_ conversation: Conversation) -> Bool {
+        conversation.messages.isEmpty && !streamingIDs.contains(conversation.identifier)
+    }
+
+    /// An existing chat in this workspace that has nothing in it yet.
+    private func blankConversation(in projectID: UUID?) -> Conversation? {
+        conversations.first { $0.projectID == projectID && isBlank($0) }
     }
 
     /// Switches the sidebar workspace and lands on that workspace's newest chat.

@@ -6,26 +6,33 @@ struct RootView: View {
     var body: some View {
         ZStack {
             CueWindowBackground()
-            HStack(spacing: 0) {
-                if session.sidebarOpen {
-                    SidebarView(session: session)
-                        .frame(width: CueTheme.sidebarWidth)
-                        .cueGlass(cornerRadius: 18, interactive: true)
-                        .padding(.leading, CueTheme.sidebarInset)
-                        .padding(.top, CueTheme.headerHeight + CueTheme.sidebarInset)
-                        .padding(.bottom, CueTheme.sidebarInset)
-                        .padding(.trailing, 4)
+            GeometryReader { geo in
+                // Below the split width the sidebar floats over the chat; side by side it would
+                // leave a transcript column narrower than a single line of prose.
+                let overlaid = geo.size.width < CueTheme.sidebarSplitMinWidth
+                HStack(spacing: 0) {
+                    if session.sidebarOpen, !overlaid {
+                        sidebar
+                    }
+                    VStack(spacing: 0) {
+                        ChatView(session: session)
+                            // Reserve the toolbar band; the bar itself is drawn window-wide below
+                            // so scrolled content passes beneath the glass.
+                            .safeAreaInset(edge: .top, spacing: 0) {
+                                Color.clear.frame(height: CueTheme.headerHeight)
+                            }
+                        ComposerView(session: session)
+                            .padding(.horizontal, CueTheme.composerInset)
+                            .padding(.bottom, CueTheme.composerInset)
+                    }
                 }
-                VStack(spacing: 0) {
-                    ChatView(session: session)
-                        // Reserve the toolbar band; the bar itself is drawn window-wide below so
-                        // scrolled content passes beneath the glass.
-                        .safeAreaInset(edge: .top, spacing: 0) {
-                            Color.clear.frame(height: CueTheme.headerHeight)
-                        }
-                    ComposerView(session: session)
-                        .padding(.horizontal, CueTheme.composerInset)
-                        .padding(.bottom, CueTheme.composerInset)
+                .overlay(alignment: .leading) {
+                    if session.sidebarOpen, overlaid {
+                        floatingSidebar(width: geo.size.width)
+                    }
+                }
+                .onChange(of: overlaid, initial: true) { _, isOverlaid in
+                    session.setSidebarOverlaid(isOverlaid)
                 }
             }
             .ignoresSafeArea(edges: .top)
@@ -131,5 +138,31 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 420, minHeight: 420)
+    }
+
+    private var sidebar: some View {
+        SidebarView(session: session)
+            .frame(width: CueTheme.sidebarWidth)
+            .cueGlass(cornerRadius: 18, interactive: true)
+            .padding(.leading, CueTheme.sidebarInset)
+            .padding(.top, CueTheme.headerHeight + CueTheme.sidebarInset)
+            .padding(.bottom, CueTheme.sidebarInset)
+            .padding(.trailing, 4)
+    }
+
+    /// The same sidebar, laid over the chat with a scrim, for windows too narrow to split.
+    private func floatingSidebar(width: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .onTapGesture { session.sidebarOpen = false }
+            SidebarView(session: session)
+                .frame(width: min(CueTheme.sidebarWidth, max(200, width - CueTheme.sidebarOverlayGutter)))
+                .cueGlass(cornerRadius: 18, interactive: true)
+                .padding(.leading, CueTheme.sidebarInset)
+                .padding(.top, CueTheme.headerHeight + CueTheme.sidebarInset)
+                .padding(.bottom, CueTheme.sidebarInset)
+                .shadow(color: .black.opacity(0.3), radius: 24, x: 6)
+        }
     }
 }
