@@ -4,32 +4,218 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
-  body { font-family: -apple-system, system-ui, sans-serif; }
-  svg { display: block; max-width: 100%; height: auto; }
+  :root {
+    --dot: rgba(0, 0, 0, 0.22);
+    --grid: 20px;
+    --dot-radius: 1px;
+  }
+  :root[data-theme="dark"] { --dot: rgba(255, 255, 255, 0.20); }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: transparent; overflow: hidden;
+    font-family: -apple-system, system-ui, sans-serif;
+  }
+  /* The infinite canvas: a world-space dot grid whose spacing follows the camera so it reads
+     as paper under the diagram, the way Excalidraw's grid does. */
+  #canvas {
+    position: absolute; inset: 0;
+    cursor: grab;
+    user-select: none; -webkit-user-select: none;
+    background-image: radial-gradient(circle, var(--dot) var(--dot-radius), transparent calc(var(--dot-radius) + 0.4px));
+    background-size: var(--grid) var(--grid);
+    background-position: 0 0;
+  }
+  #canvas.grabbing { cursor: grabbing; }
+  #scene {
+    position: absolute; left: 0; top: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+  #scene svg { display: block; max-width: none !important; }
 </style>
 <script>
-  // Host page for one Mermaid block. Swift calls cueRender(source, theme, cachedSvg) after load;
-  // results and sizes come back through the cueMermaid message handler.
+  // Host page for one Mermaid block. Swift calls cueRender(source, theme, cachedSvg) after load
+  // and drives the camera through window.cueViewer; results, sizes and camera state come back
+  // through the cueMermaid message handler.
   (function () {
     const post = (payload) => window.webkit?.messageHandlers?.cueMermaid?.postMessage(payload);
-    let observer = null;
-    const report = () => {
-      const svg = document.body.querySelector('svg');
-      if (!svg) return;
-      post({ type: 'size', height: Math.ceil(svg.getBoundingClientRect().height) });
+    const GRID = 20;
+    const PAD = 24;
+    const MIN_ZOOM = 0.1;
+    const MAX_ZOOM = 30;
+    const ZOOM_STEP = 0.1;
+
+    let canvas = null;
+    let scene = null;
+    let content = { width: 0, height: 0 };
+    // Screen = world * zoom + (x, y). `camera` is what is drawn; `target` is where the current
+    // ease is heading. Pans move both so a drag never fights an animation.
+    const camera = { x: 0, y: 0, zoom: 1 };
+    const target = { x: 0, y: 0, zoom: 1 };
+    let home = { x: 0, y: 0, zoom: 1 };
+    let frame = 0;
+    let ease = null;
+    let lastReport = { zoom: -1, home: null };
+
+    const clampZoom = (z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number.isFinite(z) ? z : 1));
+    const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
+
+    /// Camera that shows the whole diagram centered, never enlarged past 1:1.
+    const fitCamera = () => {
+      const view = viewport();
+      if (!content.width || !content.height) return { x: PAD, y: PAD, zoom: 1 };
+      const zoom = clampZoom(Math.min(1, (view.width - PAD * 2) / content.width, (view.height - PAD * 2) / content.height));
+      return {
+        zoom,
+        x: (view.width - content.width * zoom) / 2,
+        y: (view.height - content.height * zoom) / 2
+      };
     };
-    const show = (svg) => {
-      document.body.innerHTML = svg;
-      // Mermaid's DOMPurify pass drops the root id under WebKit, orphaning its scoped stylesheet.
-      const root = document.body.querySelector('svg');
-      if (root) root.id = 'cue';
-      report();
-      if (!observer) {
-        observer = new ResizeObserver(report);
-        observer.observe(document.body);
+
+    const isHome = (cam) => Math.abs(cam.zoom - home.zoom) < 0.002 && Math.abs(cam.x - home.x) < 0.5 && Math.abs(cam.y - home.y) < 0.5;
+
+    const draw = () => {
+      if (!scene) return;
+      scene.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})`;
+      // Keep the dots legible when zoomed far out by doubling their spacing.
+      let spacing = GRID * camera.zoom;
+      while (spacing < 12) spacing *= 2;
+      while (spacing > 96) spacing /= 2;
+      canvas.style.backgroundSize = `${spacing}px ${spacing}px`;
+      canvas.style.backgroundPosition = `${camera.x}px ${camera.y}px`;
+      const atHome = isHome(camera);
+      if (Math.abs(lastReport.zoom - camera.zoom) > 0.0005 || lastReport.home !== atHome) {
+        lastReport = { zoom: camera.zoom, home: atHome };
+        post({ type: 'camera', zoom: camera.zoom, home: atHome });
       }
     };
+
+    // Ease-out from wherever the camera is now to `target` over a fixed time, so a burst of
+    // wheel ticks glides and a button press lands exactly where it said it would.
+    const tick = (now) => {
+      frame = 0;
+      if (!ease) { draw(); return; }
+      const t = Math.min(1, (now - ease.start) / ease.duration);
+      const k = 1 - Math.pow(1 - t, 3);
+      camera.zoom = ease.from.zoom + (target.zoom - ease.from.zoom) * k;
+      camera.x = ease.from.x + (target.x - ease.from.x) * k;
+      camera.y = ease.from.y + (target.y - ease.from.y) * k;
+      if (t >= 1) { Object.assign(camera, target); ease = null; }
+      draw();
+      if (ease) frame = requestAnimationFrame(tick);
+    };
+
+    const animate = (ms) => {
+      ease = { from: { ...camera }, start: performance.now(), duration: ms };
+      if (!frame) frame = requestAnimationFrame(tick);
+    };
+
+    const snap = () => {
+      if (frame) { cancelAnimationFrame(frame); frame = 0; }
+      ease = null;
+      Object.assign(camera, target);
+      draw();
+    };
+
+    /// Zooms `target` so the world point under screen (px, py) stays put.
+    const zoomTo = (zoom, px, py, ms) => {
+      const next = clampZoom(zoom);
+      const ratio = next / target.zoom;
+      target.x = px - (px - target.x) * ratio;
+      target.y = py - (py - target.y) * ratio;
+      target.zoom = next;
+      animate(ms);
+    };
+
+    const center = () => {
+      const view = viewport();
+      return { x: view.width / 2, y: view.height / 2 };
+    };
+
+    window.cueViewer = {
+      /// Multiplies the zoom around a screen point; wheel and pinch input.
+      zoomAt(factor, px, py) {
+        if (!Number.isFinite(factor) || factor <= 0) return;
+        zoomTo(target.zoom * factor, px, py, 110);
+      },
+      /// Excalidraw's ± buttons: ten percentage points per press around the viewport center.
+      zoomStep(direction) {
+        const c = center();
+        const stepped = direction > 0 ? Math.floor(target.zoom / ZOOM_STEP + 1e-6) * ZOOM_STEP + ZOOM_STEP
+                                      : Math.ceil(target.zoom / ZOOM_STEP - 1e-6) * ZOOM_STEP - ZOOM_STEP;
+        zoomTo(stepped, c.x, c.y, 160);
+      },
+      /// Back to 1:1 around the viewport center.
+      resetZoom() {
+        const c = center();
+        zoomTo(1, c.x, c.y, 200);
+      },
+      /// Whole diagram in view; also where scrolling hands back to the chat.
+      fit(animated) {
+        home = fitCamera();
+        Object.assign(target, home);
+        if (animated) animate(220); else snap();
+      },
+      panBy(dx, dy) {
+        if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+        target.x += dx; target.y += dy;
+        camera.x += dx; camera.y += dy;
+        if (ease) { ease.from.x += dx; ease.from.y += dy; }
+        if (!frame) draw();
+      }
+    };
+
+    // Drag to pan, with the grab cursor Excalidraw's hand tool shows.
+    let drag = null;
+    const onPointerDown = (event) => {
+      if (event.button !== 0) return;
+      drag = { x: event.clientX, y: event.clientY };
+      canvas.classList.add('grabbing');
+      canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    };
+    const onPointerMove = (event) => {
+      if (!drag) return;
+      window.cueViewer.panBy(event.clientX - drag.x, event.clientY - drag.y);
+      drag = { x: event.clientX, y: event.clientY };
+    };
+    const onPointerUp = (event) => {
+      if (!drag) return;
+      drag = null;
+      canvas.classList.remove('grabbing');
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    };
+
+    const measure = () => {
+      const svg = scene?.querySelector('svg');
+      if (!svg) return;
+      const box = svg.viewBox?.baseVal;
+      let width = box && box.width ? box.width : 0;
+      let height = box && box.height ? box.height : 0;
+      if (!width || !height) {
+        const rect = svg.getBoundingClientRect();
+        width = rect.width / camera.zoom; height = rect.height / camera.zoom;
+      }
+      // Mermaid emits width="100%" plus a max-width; pin the SVG to its natural size so the
+      // camera, not the page, decides how big it is drawn.
+      svg.setAttribute('width', width);
+      svg.setAttribute('height', height);
+      svg.style.maxWidth = 'none';
+      content = { width, height };
+      const fit = fitCamera();
+      // Ask Swift for the height the diagram wants at the width it has; Swift clamps it.
+      post({ type: 'size', height: Math.ceil(content.height * fit.zoom + PAD * 2), width: Math.ceil(content.width), naturalHeight: Math.ceil(content.height) });
+    };
+
+    const show = (svg) => {
+      scene.innerHTML = svg;
+      // Mermaid's DOMPurify pass drops the root id under WebKit, orphaning its scoped stylesheet.
+      const root = scene.querySelector('svg');
+      if (root) root.id = 'cue';
+      measure();
+      window.cueViewer.fit(false);
+    };
+
     let configuredTheme = null;
     let library = null;
     // The 3.5 MB library is only parsed when a diagram actually needs rendering; cache hits
@@ -45,7 +231,9 @@
       });
       return library;
     };
+
     window.cueRender = async function (source, theme, cachedSvg) {
+      document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
       try {
         if (cachedSvg) { show(cachedSvg); return; }
         const mermaid = await loadLibrary();
@@ -55,7 +243,7 @@
             securityLevel: 'strict',
             theme: theme,
             fontFamily: '-apple-system, system-ui, sans-serif',
-            flowchart: { useMaxWidth: true, htmlLabels: true }
+            flowchart: { useMaxWidth: false, htmlLabels: true }
           });
           configuredTheme = theme;
         }
@@ -66,9 +254,28 @@
         post({ type: 'error', message: String(error?.message ?? error).split('\n')[0] });
       }
     };
-    post({ type: 'ready' });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      canvas = document.getElementById('canvas');
+      scene = document.getElementById('scene');
+      canvas.addEventListener('pointerdown', onPointerDown);
+      canvas.addEventListener('pointermove', onPointerMove);
+      canvas.addEventListener('pointerup', onPointerUp);
+      canvas.addEventListener('pointercancel', onPointerUp);
+      canvas.addEventListener('dblclick', (event) => { event.preventDefault(); window.cueViewer.fit(true); });
+      // A resize while resting at home keeps the diagram fitted; a zoomed view keeps its camera.
+      window.addEventListener('resize', () => {
+        const wasHome = isHome(target);
+        home = fitCamera();
+        if (wasHome) { Object.assign(target, home); snap(); } else { draw(); }
+      });
+      draw();
+      post({ type: 'ready' });
+    });
   })();
 </script>
 </head>
-<body></body>
+<body>
+  <div id="canvas"><div id="scene"></div></div>
+</body>
 </html>

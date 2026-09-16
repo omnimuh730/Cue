@@ -20,25 +20,23 @@ struct CodeBlockView: View {
 
     var body: some View {
         CodeBlockFrame(title: title, source: source, hovering: $hovering) {
-            ScrollView(.horizontal) {
-                SelectableTextView(text: MarkdownTextBuilder.code(source), wraps: false)
-                    .padding(.horizontal, CueTheme.Spacing.sm)
-                    .padding(.vertical, 10)
-            }
-            .scrollBounceBehavior(.basedOnSize)
-            .scrollIndicators(.automatic)
+            NumberedCodeView(text: MarkdownTextBuilder.code(source))
+                .padding(.trailing, CueTheme.Spacing.sm)
+                .padding(.vertical, 10)
         }
     }
 }
 
 /// The shared chrome around a code or diagram block: label, copy button, and a ground solid
 /// enough to read against the window's glass.
-struct CodeBlockFrame<Content: View>: View {
+struct CodeBlockFrame<Content: View, Accessory: View>: View {
     var title: String
     /// What the copy button puts on the pasteboard.
     var source: String
     @Binding var hovering: Bool
     @ViewBuilder var content: Content
+    /// Extra header control, drawn beside the copy button.
+    @ViewBuilder var accessory: Accessory
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var copied = false
@@ -67,6 +65,7 @@ struct CodeBlockFrame<Content: View>: View {
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
+            accessory
             Button {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(source, forType: .string)
@@ -95,6 +94,12 @@ struct CodeBlockFrame<Content: View>: View {
         .padding(.horizontal, CueTheme.Spacing.sm)
         .padding(.vertical, 6)
         .background(Color.primary.opacity(0.05))
+    }
+}
+
+extension CodeBlockFrame where Accessory == EmptyView {
+    init(title: String, source: String, hovering: Binding<Bool>, @ViewBuilder content: () -> Content) {
+        self.init(title: title, source: source, hovering: hovering, content: content, accessory: { EmptyView() })
     }
 }
 
