@@ -5,6 +5,8 @@ struct ComposerView: View {
     @Bindable var session: AppSession
     @State private var skillIndex = 0
     @State private var skillPickerDismissed = false
+    @State private var toolIndex = 0
+    @State private var toolPickerDismissed = false
 
     /// Text after a leading `/`, while the user is still typing a skill name.
     private var skillQuery: String? {
@@ -13,6 +15,16 @@ struct ComposerView: View {
 
     private var skillMatches: [SkillDefinition] {
         SkillInvocation.filter(session.skills.skills, query: skillQuery ?? "")
+    }
+
+    /// Text after an `@` the user is typing, anywhere in the draft. `/` wins when both are open.
+    private var toolQuery: String? {
+        guard skillQuery == nil, !toolPickerDismissed else { return nil }
+        return MentionInvocation.query(in: session.draft)
+    }
+
+    private var toolMatches: [ComposerTool] {
+        MentionInvocation.filter(ComposerTool.allCases, query: toolQuery ?? "")
     }
 
     var body: some View {
@@ -25,6 +37,15 @@ struct ComposerView: View {
                     globalRoot: session.skills.globalRoot,
                     onPick: { pickSkill($0) },
                     onHover: { skillIndex = $0 }
+                )
+                .transition(.opacity)
+            } else if let query = toolQuery {
+                ToolPickerPanel(
+                    tools: toolMatches,
+                    query: query,
+                    selectedIndex: toolIndex,
+                    onPick: { pickTool($0) },
+                    onHover: { toolIndex = $0 }
                 )
                 .transition(.opacity)
             }
@@ -45,8 +66,23 @@ struct ComposerView: View {
                 } else if wasOpen {
                     skillIndex = 0
                 }
+                let mentionWasOpen = MentionInvocation.query(in: previous) != nil
+                let mentionIsOpen = MentionInvocation.query(in: next) != nil
+                if mentionIsOpen, !mentionWasOpen {
+                    toolPickerDismissed = false
+                    toolIndex = 0
+                } else if !mentionIsOpen {
+                    toolPickerDismissed = false
+                } else if mentionWasOpen {
+                    toolIndex = 0
+                }
             }
-            .animation(.easeInOut(duration: 0.12), value: skillQuery == nil)
+            .animation(.easeInOut(duration: 0.12), value: skillQuery == nil && toolQuery == nil)
+    }
+
+    private func pickTool(_ tool: ComposerTool) {
+        session.attachTool(tool)
+        toolIndex = 0
     }
 
     private func pickSkill(_ skill: SkillDefinition) {
@@ -54,25 +90,47 @@ struct ComposerView: View {
         skillIndex = 0
     }
 
-    /// Arrow keys, Return, Tab, and Escape drive the picker while it is open.
+    /// Arrow keys, Return, Tab, and Escape drive whichever picker is open.
     private func handleCommand(_ selector: Selector) -> Bool {
-        guard skillQuery != nil else { return false }
-        let matches = skillMatches
+        if skillQuery != nil {
+            return handlePickerCommand(selector, count: skillMatches.count, index: &skillIndex) { index in
+                pickSkill(skillMatches[index])
+            } dismiss: {
+                skillPickerDismissed = true
+            }
+        }
+        if toolQuery != nil {
+            return handlePickerCommand(selector, count: toolMatches.count, index: &toolIndex) { index in
+                pickTool(toolMatches[index])
+            } dismiss: {
+                toolPickerDismissed = true
+            }
+        }
+        return false
+    }
+
+    private func handlePickerCommand(
+        _ selector: Selector,
+        count: Int,
+        index: inout Int,
+        pick: (Int) -> Void,
+        dismiss: () -> Void
+    ) -> Bool {
         switch selector {
         case #selector(NSResponder.moveUp(_:)):
-            guard !matches.isEmpty else { return true }
-            skillIndex = (skillIndex - 1 + matches.count) % matches.count
+            guard count > 0 else { return true }
+            index = (index - 1 + count) % count
             return true
         case #selector(NSResponder.moveDown(_:)):
-            guard !matches.isEmpty else { return true }
-            skillIndex = (skillIndex + 1) % matches.count
+            guard count > 0 else { return true }
+            index = (index + 1) % count
             return true
         case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertTab(_:)):
-            guard matches.indices.contains(skillIndex) else { return selector == #selector(NSResponder.insertTab(_:)) }
-            pickSkill(matches[skillIndex])
+            guard index < count else { return selector == #selector(NSResponder.insertTab(_:)) }
+            pick(index)
             return true
         case #selector(NSResponder.cancelOperation(_:)):
-            skillPickerDismissed = true
+            dismiss()
             return true
         default:
             return false
@@ -154,7 +212,7 @@ struct ComposerView: View {
         if let project = session.activeProject {
             return project.codeFolder != nil ? "Ask about \(project.name)" : "Message \(project.name)"
         }
-        return "Ask anything · type / for skills"
+        return "Ask anything · / for skills · @ for tools"
     }
 
     /// Chats other than the one on screen that are still receiving a reply.

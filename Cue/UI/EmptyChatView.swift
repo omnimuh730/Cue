@@ -51,6 +51,7 @@ struct EmptyChatView: View {
                     "Ask anything.",
                     "Attach a file, or paste a screenshot.",
                     "Type / for a skill.",
+                    "Type @web_search to answer with sources.",
                     "Start a project to keep chats together."
                 ],
                 active: appeared

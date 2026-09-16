@@ -336,6 +336,13 @@ final class AppSession {
         attachments.append(SkillInvocation.attachment(for: skill))
     }
 
+    /// Attaches a per-message tool as a chip and clears the `@query` token so the user can keep typing.
+    func attachTool(_ tool: ComposerTool) {
+        draft = MentionInvocation.removingQuery(from: draft)
+        attachments.removeAll { $0.kind == .tool && $0.name == tool.rawValue }
+        attachments.append(tool.attachment)
+    }
+
     func deleteConversation(_ conversation: Conversation) {
         stop(conversationID: conversation.identifier)
         container.mainContext.delete(conversation)
@@ -666,6 +673,8 @@ final class AppSession {
     ) -> AsyncThrowingStream<ChatStreamEvent, Error> {
         let snapshot = settings
         let project = project(for: conversation)
+        let lastUserAttachments = history.last { $0.role == .user }?.attachments ?? []
+        let webSearch = snapshot.webSearchEnabled || ComposerTool.webSearch.isRequested(in: lastUserAttachments)
         if let project, let folder = project.codeFolder {
             guard let binary = CodexBinaryLocator.resolve(override: snapshot.codexPath) else {
                 return AsyncThrowingStream { continuation in
@@ -681,7 +690,7 @@ final class AppSession {
                 effort: snapshot.reasoningEffort,
                 projectPath: folder,
                 threadID: conversation.codexThreadID,
-                prompt: CodexPrompt.build(messages: messages, catalog: project.catalog, project: project.context),
+                prompt: CodexPrompt.build(messages: messages, catalog: project.catalog, project: project.context, webSearch: webSearch),
                 images: messages.last { $0.role == .user }?.attachments.filter(\.isImage) ?? []
             )
             return codex.stream(request, signal: token)
@@ -689,6 +698,7 @@ final class AppSession {
         var continuation = ChatContinuationBuilder.build(from: history)
         continuation.promptCacheKey = "cue-\(conversation.identifier.uuidString.lowercased())"
         continuation.project = project.map(\.context)
+        continuation.webSearch = webSearch
         return client.stream(apiKey: apiKey, settings: snapshot, continuation: continuation, signal: token)
     }
 
@@ -998,6 +1008,11 @@ final class AppSession {
             if message.content.isEmpty {
                 message.content = text
             }
+        case .citation(let citation):
+            var citations = message.citations
+            guard !citations.contains(where: { $0.url == citation.url }) else { return }
+            citations.append(citation)
+            message.citations = citations
         }
         conversation.updatedAt = .now
         request.lastSaveAt = Date()

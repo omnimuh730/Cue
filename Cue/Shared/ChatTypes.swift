@@ -23,6 +23,8 @@ nonisolated enum AttachmentKind: String, Codable, Sendable {
     case text
     /// Skill body attached from the `/` picker; `text` is the skill Markdown.
     case skill
+    /// A per-message tool switched on from the `@` picker (`name` is the `ComposerTool`); no payload.
+    case tool
 }
 
 nonisolated struct MessageAttachment: Identifiable, Codable, Equatable, Sendable {
@@ -137,6 +139,27 @@ nonisolated struct PreferenceChange: Codable, Equatable, Sendable {
     var effort: ReasoningEffort
 }
 
+/// A web source the model cited, from a `url_citation` annotation.
+nonisolated struct Citation: Codable, Equatable, Hashable, Sendable {
+    var url: String
+    var title: String
+    /// Character span of the answer the citation supports, when the API gave one.
+    var startIndex: Int?
+    var endIndex: Int?
+
+    /// Host without a leading "www.", for the chip.
+    var host: String {
+        let host = URL(string: url)?.host ?? url
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
+    /// The title, or the host when the API sent none.
+    var displayTitle: String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? host : trimmed
+    }
+}
+
 nonisolated struct ChatTurn: Identifiable, Codable, Equatable, Sendable {
     var id: UUID
     var role: MessageRole
@@ -152,6 +175,7 @@ nonisolated struct ChatTurn: Identifiable, Codable, Equatable, Sendable {
     var reasoningEffort: ReasoningEffort?
     var responseID: String?
     var preferenceChange: PreferenceChange?
+    var citations: [Citation] = []
 
     var isAPIMessage: Bool {
         role == .user || role == .assistant
@@ -172,6 +196,9 @@ nonisolated struct ChatContinuation: Equatable, Sendable {
     var promptCacheKey: String? = nil
     /// Instructions and knowledge of the project this thread belongs to, if any.
     var project: ProjectContext? = nil
+    /// Whether this turn may call web search: the global setting, or an `@web_search` chip on
+    /// the newest user message.
+    var webSearch = false
 }
 
 /// Composer primary action. A live turn never blocks send: typed follow-ups interrupt immediately.

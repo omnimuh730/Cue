@@ -159,7 +159,7 @@ nonisolated enum CodexPrompt {
 
     /// The Codex thread carries history, so each turn sends only the newest user message,
     /// optionally preceded by the project map catalog and the text of any attached files.
-    static func build(messages: [ChatRequestMessage], catalog: String?, project: ProjectContext? = nil) -> String {
+    static func build(messages: [ChatRequestMessage], catalog: String?, project: ProjectContext? = nil, webSearch: Bool = false) -> String {
         let last = messages.last { $0.role == .user }
         var user = last.flatMap { $0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.content }
             ?? (last?.attachments.isEmpty == false ? "Please read the attached files." : "Please continue from the current project context.")
@@ -173,6 +173,9 @@ nonisolated enum CodexPrompt {
         }
         if let last, let attached = AttachmentPrompt.text(for: last.attachments, includePDFText: true) {
             sections.append(attached)
+        }
+        if webSearch {
+            sections.append("Use web search for this question and name the sources you relied on.")
         }
         guard !sections.isEmpty else { return user }
         return sections.joined(separator: "\n\n") + "\n\nUser question:\n\(user)"

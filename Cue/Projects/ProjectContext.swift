@@ -39,7 +39,7 @@ nonisolated struct ProjectContext: Equatable, Sendable {
 
     /// Strips payloads so a knowledge entry is text only; images have no text and are rejected.
     static func knowledgeEntry(from attachment: MessageAttachment) -> MessageAttachment? {
-        guard attachment.kind != .image, attachment.kind != .skill else { return nil }
+        guard attachment.kind != .image, attachment.kind != .skill, attachment.kind != .tool else { return nil }
         var entry = attachment
         entry.dataURL = ""
         return entry

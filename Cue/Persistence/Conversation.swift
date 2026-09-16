@@ -96,6 +96,8 @@ final class Message {
     var usageJSON: Data?
     var timingJSON: Data?
     var preferenceJSON: Data?
+    /// `[Citation]` from web search; nil when the answer cited nothing.
+    var citationsJSON: Data?
     var conversation: Conversation?
 
     init(
@@ -124,6 +126,11 @@ final class Message {
         decode(attachmentsJSON, as: [MessageAttachment].self, decoder: JSONDecoder()) ?? []
     }
 
+    var citations: [Citation] {
+        get { decode(citationsJSON, as: [Citation].self, decoder: JSONDecoder()) ?? [] }
+        set { citationsJSON = newValue.isEmpty ? nil : encode(newValue) }
+    }
+
     var timing: ResponseTiming? {
         decode(timingJSON, as: ResponseTiming.self, decoder: JSONDecoder())
     }
@@ -148,7 +155,8 @@ final class Message {
             model: modelRaw.flatMap(ModelID.init(rawValue:)),
             reasoningEffort: effortRaw.flatMap(ReasoningEffort.init(rawValue:)),
             responseID: responseID,
-            preferenceChange: decode(preferenceJSON, as: PreferenceChange.self, decoder: decoder)
+            preferenceChange: decode(preferenceJSON, as: PreferenceChange.self, decoder: decoder),
+            citations: decode(citationsJSON, as: [Citation].self, decoder: decoder) ?? []
         )
     }
 
@@ -167,6 +175,7 @@ final class Message {
         usageJSON = turn.usage.flatMap(encode)
         timingJSON = turn.timing.flatMap(encode)
         preferenceJSON = turn.preferenceChange.flatMap(encode)
+        citationsJSON = turn.citations.isEmpty ? nil : encode(turn.citations)
     }
 }
 

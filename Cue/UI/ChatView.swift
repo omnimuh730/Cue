@@ -238,6 +238,10 @@ struct MessageBubble: View {
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    if !message.citations.isEmpty {
+                        CitationRow(citations: message.citations)
+                            .padding(.top, 2)
+                    }
                     if status == .streaming, !message.content.isEmpty {
                         CueMarkSpin(pointSize: 13, spinning: true, style: .busy)
                     }
@@ -262,7 +266,7 @@ struct MessageBubble: View {
     private var copyRow: some View {
         Button {
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(message.content, forType: .string)
+            NSPasteboard.general.setString(MessageCopy.text(content: message.content, citations: message.citations), forType: .string)
             copied = true
             Task {
                 try? await Task.sleep(for: .seconds(1.4))
@@ -283,5 +287,16 @@ struct MessageBubble: View {
         .animation(.easeInOut(duration: 0.15), value: hovering || copied)
         .help("Copy message text")
         .accessibilityLabel("Copy message")
+    }
+}
+
+/// What the copy button puts on the pasteboard: the answer, then its sources if it had any.
+nonisolated enum MessageCopy {
+    static func text(content: String, citations: [Citation]) -> String {
+        guard !citations.isEmpty else { return content }
+        let sources = citations.enumerated().map { index, citation in
+            "\(index + 1). \(citation.displayTitle) — \(citation.url)"
+        }
+        return content.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\nSources:\n" + sources.joined(separator: "\n")
     }
 }

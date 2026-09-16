@@ -40,6 +40,12 @@ There is no title bar: the sidebar row's info button opens `ThreadInfoView` (cos
 
 `AttachmentPrompt` renders every non-image attachment as text shared by both backends. The Responses client sends images as `input_image`, PDFs natively as `input_file`, and the rest as an `input_text` part ahead of the user's words; Codex gets the same text (PDF text included) in the prompt and images by path via `--image`.
 
+## Mentions and citations
+
+Typing `@` anywhere in the draft opens the same picker as `/` (`ComposerPickerPanel`, generic over `ComposerPickable`) listing `ComposerTool` — `web_search` today. Picking one attaches a `.tool` chip with no payload; `AttachmentPrompt` and the Responses input skip it, and `AppSession.makeStream` reads it: `ChatContinuation.webSearch` is the global setting **or** an `@web_search` chip on the newest user message, and only then does the request carry `tools: [web_search]` and the search hint in `instructions`. Codex chats get a "use web search" line in the prompt instead.
+
+`ResponsesClient` turns `response.output_text.annotation.added` events of type `url_citation` into `ChatStreamEvent.citation`, deduped by URL per response, and backfills from the completed response's `output[].content[].annotations`. Citations are stored on the message (`citationsJSON`) and drawn by `CitationRow` as numbered host + title chips under the answer (five, then "+N"); clicking opens the page and Copy appends a Sources list.
+
 ## Skills
 
 A skill is Markdown in `~/.cue/skills/` (`name.md` or `name/SKILL.md`, optional front matter with `name:` / `description:`); a project with a code folder also contributes `.cue/skills` and `.claude/skills` from that folder, overriding global names. `SkillCatalog` loads and parses; `SkillLibrary` (MainActor) keeps the list current with a vnode source on the global folder and reloads when the workspace changes. Typing `/` at the start of the draft opens `SkillPickerPanel` above the composer; the field forwards arrows / Return / Tab / Escape to it. Picking a skill attaches it as a `.skill` chip with the body captured at that moment, so history stays stable if the file changes later.

@@ -16,6 +16,10 @@ Do not run the nested `Halo/` or `AirScript/` trees as part of this target. They
 
 Attach PDF, Word, Excel, PowerPoint, images, Markdown, and other text files with the paperclip, by dropping them on the composer, or by pasting a file with ⌘V. PDFs go to OpenAI as-is; Office files are read on your Mac with Apple frameworks (no plugins) and sent as text. Click a chip to preview it.
 
+## Web search
+
+Turn **Settings → Chat → Web search** on for every message, or type `@web_search` in the composer to search for just that one. Answers that used search show numbered source chips underneath; click one to open it, and **Copy** includes the list.
+
 ## Skills
 
 Put Markdown files in `~/.cue/skills/` — either `name.md` or `name/SKILL.md`, optionally starting with a front-matter block that sets `name:` and `description:`. Type `/` in the composer to pick one; it attaches as a chip and the model follows it for that message. Projects with a code folder also pick up `.cue/skills` and `.claude/skills` inside that folder. **Settings → Skills** lists what is loaded.
