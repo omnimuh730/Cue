@@ -1111,7 +1111,7 @@ final class AppSession {
     /// one is there.
     func answerFromTranscript(sentences: Int) {
         guard let question = listen.transcript.question(sentences: sentences) else {
-            remoteNotice = listen.transcript.isEmpty ? "Nothing heard yet." : "Nothing new to answer."
+            notify(listen.transcript.isEmpty ? "Nothing heard yet." : "Nothing new to answer.", autoDismiss: 3)
             return
         }
         let typed = draft
