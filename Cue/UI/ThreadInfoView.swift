@@ -71,6 +71,7 @@ struct ThreadInfoView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .cueGlass(cornerRadius: 14, interactive: true)
@@ -215,6 +216,7 @@ struct ThreadInfoView: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .cueGlass(cornerRadius: 16, interactive: true)
         }
         .padding(.horizontal, 20)

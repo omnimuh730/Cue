@@ -220,21 +220,32 @@ final class ComposerTextView: NSTextView {
     var onImage: (NSImage) -> Void = { _ in }
 
     /// Files and images on the pasteboard become attachments; anything else pastes as plain text.
+    /// Like ChatGPT, an image copied from anywhere — a browser, Preview, a screenshot — lands as
+    /// an attachment even when the source also put a caption or URL string alongside it.
     override func paste(_ sender: Any?) {
         let pasteboard = NSPasteboard.general
         let urls = Self.fileURLs(on: pasteboard)
-        if !urls.isEmpty {
+        let intent = PasteboardIntent.classify(
+            types: pasteboard.types?.map(\.rawValue) ?? [],
+            hasFiles: !urls.isEmpty,
+            hasString: pasteboard.string(forType: .string) != nil
+        )
+        switch intent {
+        case .files:
             onFiles(urls)
-            return
+        case .image:
+            if let image = NSImage(pasteboard: pasteboard) {
+                onImage(image)
+            } else {
+                super.pasteAsPlainText(sender)
+            }
+        case .text:
+            super.pasteAsPlainText(sender)
         }
-        if pasteboard.string(forType: .string) == nil,
-           let image = pasteboard.readObjects(forClasses: [NSImage.self])?.first as? NSImage {
-            onImage(image)
-            return
-        }
-        super.pasteAsPlainText(sender)
     }
 
+    // A file dropped on the field itself attaches here; anywhere else in the window,
+    // `RootView`'s drop handler takes it, so the target is the whole window and not this strip.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         Self.fileURLs(on: sender.draggingPasteboard).isEmpty ? super.draggingEntered(sender) : .copy
     }

@@ -57,6 +57,14 @@ struct PublicSettings: Codable, Equatable, Sendable {
     var hotkeys: [String: String]
     /// Optional path to a `codex` CLI for project chats. Nil means auto-detect.
     var codexPath: String?
+    /// Stored optional so settings saved before this field existed still decode; read
+    /// `readingOrder` instead.
+    private var storedReadingOrder: ReadingOrder?
+
+    var readingOrder: ReadingOrder {
+        get { storedReadingOrder ?? .newestAtBottom }
+        set { storedReadingOrder = newValue }
+    }
 
     static let `default` = PublicSettings(
         model: .sol,
@@ -71,7 +79,8 @@ struct PublicSettings: Codable, Equatable, Sendable {
         passiveFocusMode: true,
         systemInstruction: "",
         hotkeys: Dictionary(uniqueKeysWithValues: HotkeyCatalog.defaults.map { ($0.key.rawValue, $0.value) }),
-        codexPath: nil
+        codexPath: nil,
+        storedReadingOrder: nil
     )
 
     var hotkeyMap: HotkeyMap {

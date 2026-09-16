@@ -243,16 +243,28 @@ struct SelectableTextTests {
         #expect(bodyStyle?.textBlocks.isEmpty == true)
     }
 
-    @Test func segmentsSplitAtMermaidOnly() {
+    @Test func segmentsSplitAtCodeAndMermaid() {
         let blocks = MarkdownRenderer.render("Intro\n\n```swift\nx\n```\n\n```mermaid\nflowchart LR\n```\n\nOutro", reusing: [])
         let segments = MessageSegment.group(blocks)
-        #expect(segments.count == 3)
-        guard case .text(_, let first) = segments[0], case .mermaid(_, let diagram) = segments[1], case .text(_, let last) = segments[2] else {
+        #expect(segments.count == 4)
+        guard case .text(_, let first) = segments[0],
+              case .code(_, let language, let code) = segments[1],
+              case .mermaid(_, let diagram) = segments[2],
+              case .text(_, let last) = segments[3]
+        else {
             Issue.record("unexpected segment layout")
             return
         }
-        #expect(first.count == 2)
+        #expect(first.count == 1)
+        #expect(language == "swift")
+        #expect(code == "x")
         #expect(diagram == "flowchart LR")
         #expect(last.count == 1)
+    }
+
+    @Test func codeLanguageLabelsFallBackToTheFence() {
+        #expect(CodeLanguage.label(for: "py") == "Python")
+        #expect(CodeLanguage.label(for: "TS") == "TypeScript")
+        #expect(CodeLanguage.label(for: "brainfuck") == "brainfuck")
     }
 }

@@ -9,6 +9,7 @@ struct MermaidBlockView: View {
     @State private var height: CGFloat = 160
     @State private var error: String?
     @State private var magnification: CGFloat = 1
+    @State private var hovering = false
 
     var body: some View {
         // A cached height means no layout jump when a diagram scrolls back into view.
@@ -17,44 +18,50 @@ struct MermaidBlockView: View {
         Group {
             if let error {
                 VStack(alignment: .leading, spacing: 8) {
-                    MermaidSourceView(source: source)
+                    CodeBlockView(language: "mermaid", source: source)
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
             } else {
-                MermaidWebView(source: source, onHeight: { next in
-                    if abs(next - height) > 1 { height = next }
-                }, onError: { message in
-                    error = message
-                }, onMagnification: { next in
-                    magnification = next
-                })
-                .frame(height: min(max(shownHeight, 80), 900))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(alignment: .bottomTrailing) {
-                    if magnification > 1.01 {
-                        Text("\(Int((magnification * 100).rounded()))%")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, CueTheme.Spacing.xs)
-                            .padding(.vertical, CueTheme.Spacing.xxs)
-                            .background(.thinMaterial, in: Capsule())
-                            .padding(CueTheme.Spacing.xs)
-                            .allowsHitTesting(false)
-                            .transition(.opacity)
-                    }
+                // Same chrome as a code block, so the diagram's source is one click away.
+                CodeBlockFrame(title: "Mermaid", source: source, hovering: $hovering) {
+                    diagram(height: shownHeight)
                 }
-                .animation(.easeOut(duration: 0.15), value: magnification > 1.01)
-                .help("Pinch or ⌘-scroll to zoom. Scroll or drag to pan when zoomed. Double-click to reset.")
             }
         }
         .onChange(of: source) { _, _ in
             error = nil
             magnification = 1
         }
+    }
+
+    private func diagram(height shownHeight: CGFloat) -> some View {
+        MermaidWebView(source: source, onHeight: { next in
+            if abs(next - height) > 1 { height = next }
+        }, onError: { message in
+            error = message
+        }, onMagnification: { next in
+            magnification = next
+        })
+        .frame(height: min(max(shownHeight, 80), 900))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottomTrailing) {
+            if magnification > 1.01 {
+                Text("\(Int((magnification * 100).rounded()))%")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, CueTheme.Spacing.xs)
+                    .padding(.vertical, CueTheme.Spacing.xxs)
+                    .background(.thinMaterial, in: Capsule())
+                    .padding(CueTheme.Spacing.xs)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: magnification > 1.01)
+        .help("Pinch or ⌘-scroll to zoom. Scroll or drag to pan when zoomed. Double-click to reset.")
     }
 }
 

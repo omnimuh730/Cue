@@ -2,15 +2,50 @@ import AppKit
 import Carbon
 import Foundation
 
+/// Registers Cue's global hotkeys two ways at once: a head-inserted event tap so they beat every
+/// other app's bindings, and Carbon hot keys as the fallback for when the tap cannot be installed
+/// (no Accessibility grant). A keystroke the tap swallows never reaches Carbon, so an action
+/// fires once either way.
 @MainActor
 final class GlobalHotkeyCenter {
     private var hotKeyRefs: [EventHotKeyRef?] = []
     private var handler: EventHandlerRef?
     private var actions: [UInt32: HotkeyAction] = [:]
+    private let tap = HotkeyEventTap()
     var onAction: ((HotkeyAction) -> Void)?
+
+    private var activationObserver: NSObjectProtocol?
+
+    /// True while the event tap is live, i.e. Cue's hotkeys win over other apps'.
+    var hasPriority: Bool { tap.isRunning }
+
+    init() {
+        // Accessibility can be granted while Cue is running; pick the tap up next time the app
+        // comes forward rather than waiting for a settings save.
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshPriority() }
+        }
+    }
+
+    /// Starts the priority tap if Accessibility has been granted since the last attempt.
+    func refreshPriority() {
+        guard !tap.isRunning, !actions.isEmpty, AccessibilityTrust.isTrusted else { return }
+        tap.start()
+    }
 
     func register(_ map: HotkeyMap) {
         unregister()
+        tap.update(map)
+        tap.onAction = { [weak self] action in
+            self?.onAction?(action)
+        }
+        if AccessibilityTrust.isTrusted {
+            tap.start()
+        }
         let handlerPtr: EventHandlerUPP = { _, event, userData in
             guard let userData, let event else { return OSStatus(eventNotHandledErr) }
             let center = Unmanaged<GlobalHotkeyCenter>.fromOpaque(userData).takeUnretainedValue()
@@ -58,6 +93,7 @@ final class GlobalHotkeyCenter {
     }
 
     func unregister() {
+        tap.stop()
         for ref in hotKeyRefs {
             if let ref {
                 UnregisterEventHotKey(ref)
@@ -84,6 +120,17 @@ nonisolated struct CarbonHotkey: Sendable {
         if pattern.metaOrCtrl || pattern.metaOnly { modifiers |= UInt32(cmdKey) }
         if pattern.ctrlOnly { modifiers |= UInt32(controlKey) }
         return CarbonHotkey(keyCode: keyCode, modifiers: modifiers)
+    }
+
+    /// The Carbon modifier mask for a keyboard event: ⌘ ⇧ ⌥ ⌃ only, so caps lock, fn, and the
+    /// numeric-pad flag never keep a combo from matching.
+    static func modifiers(from flags: CGEventFlags) -> UInt32 {
+        var modifiers: UInt32 = 0
+        if flags.contains(.maskShift) { modifiers |= UInt32(shiftKey) }
+        if flags.contains(.maskAlternate) { modifiers |= UInt32(optionKey) }
+        if flags.contains(.maskCommand) { modifiers |= UInt32(cmdKey) }
+        if flags.contains(.maskControl) { modifiers |= UInt32(controlKey) }
+        return modifiers
     }
 
     private static func keyCode(for code: String) -> UInt32? {

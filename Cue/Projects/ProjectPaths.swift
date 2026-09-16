@@ -69,3 +69,4 @@ nonisolated enum ProjectPaths {
         String(name.trimmingCharacters(in: .whitespaces).first ?? "?").uppercased()
     }
 }
+

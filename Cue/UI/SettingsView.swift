@@ -3,6 +3,7 @@ import SwiftUI
 
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case provider
+    case chat
     case projects
     case skills
     case listen
@@ -14,6 +15,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .provider: "AI provider"
+        case .chat: "Chat"
         case .projects: "Projects"
         case .skills: "Skills"
         case .listen: "Interview listen"
@@ -25,6 +27,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .provider: "key.fill"
+        case .chat: "text.alignleft"
         case .projects: "folder"
         case .skills: "sparkles"
         case .listen: "waveform"
@@ -72,6 +75,7 @@ struct SettingsView: View {
         .onAppear {
             draft = session.settings
             resolvedCodex = CodexBinaryLocator.resolve(override: draft.codexPath)
+            session.hotkeys.refreshPriority()
             apiKey = ""
             clearKey = false
             replacingKey = false
@@ -94,6 +98,7 @@ struct SettingsView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .cueGlass(cornerRadius: 14, interactive: true)
@@ -122,6 +127,9 @@ struct SettingsView: View {
                                     .fill(.white.opacity(0.16))
                             }
                         }
+                        // Without this the row is only clickable where its glyphs are, so the
+                        // pointer lands on the panel instead of the item.
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -136,6 +144,7 @@ struct SettingsView: View {
     private var content: some View {
         switch section {
         case .provider: provider
+        case .chat: chatSection
         case .projects: projectsSection
         case .skills: skillsSection
         case .listen: listen
@@ -403,6 +412,20 @@ struct SettingsView: View {
         resolvedCodex = CodexBinaryLocator.resolve(override: url.path)
     }
 
+    private var chatSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            CueGlassField(title: "Reading order", help: draft.readingOrder.help) {
+                Picker("Reading order", selection: $draft.readingOrder) {
+                    ForEach(ReadingOrder.allCases) { order in
+                        Text(order.label).tag(order)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            }
+        }
+    }
+
     private var listen: some View {
         VStack(alignment: .leading, spacing: 14) {
             CueGlassField(title: "Listen mode", help: draft.listenMode.help) {
@@ -446,6 +469,28 @@ struct SettingsView: View {
 
     private var hotkeys: some View {
         VStack(alignment: .leading, spacing: 14) {
+            CueGlassField(
+                title: "Priority",
+                help: session.hotkeys.hasPriority
+                    ? "Cue's shortcuts fire before any other app's, even ones that bound the same keys first."
+                    : "With Accessibility granted, Cue's shortcuts fire before any other app's. Until then another app that bound the same keys first can take them."
+            ) {
+                HStack(spacing: 10) {
+                    Image(systemName: session.hotkeys.hasPriority ? "checkmark.seal.fill" : "exclamationmark.triangle")
+                        .foregroundStyle(session.hotkeys.hasPriority ? Color.green : Color.orange)
+                    Text(session.hotkeys.hasPriority ? "Shortcuts take priority over other apps" : "Shortcuts may lose to other apps")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    if !session.hotkeys.hasPriority {
+                        Button("Grant Accessibility") {
+                            AccessibilityTrust.request()
+                            session.hotkeys.refreshPriority()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .semibold))
+                    }
+                }
+            }
             CueGlassToggle(title: "Passive focus", subtitle: "Show Cue without stealing keyboard focus.", isOn: $draft.passiveFocusMode)
             CueGlassToggle(title: "Always on top", isOn: $draft.alwaysOnTop)
             CueGlassField(title: "Opacity") {
@@ -514,6 +559,7 @@ struct SettingsView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Restore default")
@@ -574,12 +620,14 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
+                .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .cueGlass(cornerRadius: 16, interactive: true)
             Button("Save") { save() }
                 .buttonStyle(.plain)
                 .font(.system(size: 14, weight: .semibold))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
+                .contentShape(Capsule())
                 .foregroundStyle(.white)
                 .background(Color.accentColor, in: Capsule())
                 .keyboardShortcut(.defaultAction)
