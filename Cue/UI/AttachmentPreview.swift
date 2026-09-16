@@ -35,6 +35,7 @@ enum AttachmentBadge {
         case .image: "photo"
         case .pdf: "doc.richtext"
         case .skill: "sparkles"
+        case .tool: ComposerTool.named(attachment.name)?.symbol ?? "wrench.and.screwdriver"
         case .text: "doc.plaintext"
         case .document:
             if attachment.mimeType.contains("spreadsheet") { "tablecells" }
@@ -47,6 +48,7 @@ enum AttachmentBadge {
         switch attachment.kind {
         case .pdf: .red
         case .skill: .purple
+        case .tool: .accentColor
         case .text: .secondary
         case .document:
             if attachment.mimeType.contains("spreadsheet") { .green }
@@ -58,6 +60,7 @@ enum AttachmentBadge {
 
     static func detail(for attachment: MessageAttachment) -> String {
         if attachment.kind == .skill { return "Skill" }
+        if attachment.kind == .tool { return "Tool" }
         var parts: [String] = []
         if let bytes = attachment.byteCount, bytes > 0 {
             parts.append(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))
@@ -240,6 +243,18 @@ struct AttachmentPreviewOverlay: View {
             }
         case .document, .text, .skill:
             textPreview
+        case .tool:
+            VStack(spacing: 10) {
+                Image(systemName: AttachmentBadge.symbol(for: attachment))
+                    .font(.system(size: 28))
+                    .foregroundStyle(Color.accentColor)
+                Text(ComposerTool.named(attachment.name)?.label ?? attachment.name)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(ComposerTool.named(attachment.name)?.description ?? "")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(40)
         }
     }
 

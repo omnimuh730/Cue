@@ -692,7 +692,7 @@ struct SettingsView: View {
     }
 
     private func exportActive() {
-        let text = session.activeTurns.map { "\($0.role.rawValue): \($0.content)" }.joined(separator: "\n\n")
+        let text = ConversationExport.markdown(title: session.activeConversation?.title ?? "Chat", turns: session.activeTurns)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }

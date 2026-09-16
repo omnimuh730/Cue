@@ -12,9 +12,17 @@ Requires **macOS 26.5** (Tahoe) and Xcode 26.
 
 Do not run the nested `Halo/` or `AirScript/` trees as part of this target. They are reference sources only.
 
+## Chats
+
+Hover a message for **Copy**, **Regenerate** (the menu picks another model), **Edit** (sends again; later turns are removed), and **Delete from here**. A reply that failed — no network, a stopped stream — shows **Retry** next to the error. Right-click a chat in the sidebar to rename, pin, export as Markdown, or delete it; **Undo** is offered for a few seconds after a delete. **⌘K** searches titles and messages, **⌘[** / **⌘]** switch chats, and **Esc** closes whatever is open or stops the reply on screen.
+
 ## Files
 
 Attach PDF, Word, Excel, PowerPoint, images, Markdown, and other text files with the paperclip, by dropping them on the composer, or by pasting a file with ⌘V. PDFs go to OpenAI as-is; Office files are read on your Mac with Apple frameworks (no plugins) and sent as text. Click a chip to preview it.
+
+## Web search
+
+Turn **Settings → Chat → Web search** on for every message, or type `@web_search` in the composer to search for just that one. Answers that used search show numbered source chips underneath; click one to open it, and **Copy** includes the list.
 
 ## Skills
 

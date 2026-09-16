@@ -3,6 +3,10 @@ import SwiftUI
 struct SidebarView: View {
     @Bindable var session: AppSession
     @State private var hoveredID: UUID?
+    /// Chat whose title is being edited in place.
+    @State private var renamingID: UUID?
+    @State private var renameText = ""
+    @FocusState private var renameFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -26,8 +30,15 @@ struct SidebarView: View {
                                 workspaceRow(project)
                             }
                         }
+                        let pinned = session.visibleConversations(pinned: true)
+                        if !pinned.isEmpty {
+                            sectionTitle("Pinned")
+                            ForEach(pinned, id: \.identifier) { conversation in
+                                conversationRow(conversation)
+                            }
+                        }
                         sectionTitle(session.selectedProject.map { "Chats in \($0.name)" } ?? "Recents")
-                        ForEach(session.visibleConversations, id: \.identifier) { conversation in
+                        ForEach(session.visibleConversations(pinned: false), id: \.identifier) { conversation in
                             conversationRow(conversation)
                         }
                         if session.visibleConversations.isEmpty {
@@ -202,9 +213,21 @@ struct SidebarView: View {
             } label: {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(conversation.title)
-                            .font(.system(size: 13, weight: isActive || unread ? .medium : .regular))
-                            .lineLimit(1)
+                        if renamingID == conversation.identifier {
+                            TextField("Chat name", text: $renameText)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 13, weight: .medium))
+                                .focused($renameFocused)
+                                .onSubmit { commitRename(conversation) }
+                                .onExitCommand { renamingID = nil }
+                                .onChange(of: renameFocused) { _, focused in
+                                    if !focused, renamingID == conversation.identifier { commitRename(conversation) }
+                                }
+                        } else {
+                            Text(conversation.title)
+                                .font(.system(size: 13, weight: isActive || unread ? .medium : .regular))
+                                .lineLimit(1)
+                        }
                         if let status {
                             Text(status)
                                 .font(.system(size: 11))
@@ -237,6 +260,7 @@ struct SidebarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(conversation) })
             .accessibilityLabel(streaming ? "\(conversation.title), responding" : conversation.title)
 
             HStack(spacing: 0) {
@@ -273,10 +297,39 @@ struct SidebarView: View {
             RoundedRectangle(cornerRadius: CueTheme.radiusRow, style: .continuous)
                 .fill(rowFill(isActive: isActive, isHovered: isHovered))
         )
+        .contextMenu { conversationMenu(conversation) }
         .animation(.easeInOut(duration: 0.18), value: streaming)
         .onHover { hovering in
             hoveredID = hovering ? conversation.identifier : (hoveredID == conversation.identifier ? nil : hoveredID)
         }
+    }
+
+    @ViewBuilder
+    private func conversationMenu(_ conversation: Conversation) -> some View {
+        Button("Rename…") { beginRename(conversation) }
+        Button(conversation.pinnedAt == nil ? "Pin" : "Unpin") { session.togglePin(conversation) }
+        Button("Thread info") { session.infoConversationID = conversation.identifier }
+        Divider()
+        Button("Copy as Markdown") {
+            let text = ConversationExport.markdown(title: conversation.title, turns: conversation.messages.sorted { $0.createdAt < $1.createdAt }.map { $0.asTurn() })
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+        Button("Save as Markdown…") { ConversationExport.save(conversation) }
+        Divider()
+        Button("Delete", role: .destructive) { session.deleteConversation(conversation) }
+    }
+
+    private func beginRename(_ conversation: Conversation) {
+        renameText = conversation.title
+        renamingID = conversation.identifier
+        DispatchQueue.main.async { renameFocused = true }
+    }
+
+    private func commitRename(_ conversation: Conversation) {
+        guard renamingID == conversation.identifier else { return }
+        renamingID = nil
+        session.renameConversation(conversation, to: renameText)
     }
 
     private func rowFill(isActive: Bool, isHovered: Bool) -> Color {

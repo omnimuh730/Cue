@@ -33,9 +33,10 @@ struct ThreadInfoView: View {
                 Divider().opacity(0.12)
                 footer
             }
-            .frame(width: 560, height: 520)
+            .frame(maxWidth: 560, maxHeight: 520)
             .cueGlass(cornerRadius: 28, interactive: true)
             .shadow(color: .black.opacity(0.28), radius: 40, y: 18)
+            .padding(24)
         }
         .task(id: conversation.identifier) {
             // Decoding every turn's usage JSON is not free on long threads; do it once, off-main.

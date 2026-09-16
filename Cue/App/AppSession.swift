@@ -62,7 +62,11 @@ final class AppSession {
     /// Conversation whose thread info sheet is open.
     var infoConversationID: UUID?
     var mermaidAsCode = false
-    var remoteNotice: String?
+    /// Message the transcript should scroll to once it is on screen (from search).
+    var scrollTarget: UUID?
+    /// One transient notice at a time: errors, confirmations, "Undo".
+    private(set) var notice: Notice?
+    private var noticeDismissal: Task<Void, Never>?
 
     /// Conversations with a turn in flight. Drives sidebar and composer state.
     private(set) var streamingIDs: Set<UUID> = []
@@ -203,9 +207,21 @@ final class AppSession {
 
     // MARK: - Persistence
 
+    /// How long a deleted chat can be brought back before it is purged.
+    static let undoWindow: TimeInterval = 60
+
     func reloadConversations() {
         let descriptor = FetchDescriptor<Conversation>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
-        conversations = (try? container.mainContext.fetch(descriptor)) ?? []
+        let all = (try? container.mainContext.fetch(descriptor)) ?? []
+        var purged = false
+        for conversation in all {
+            if let deletedAt = conversation.deletedAt, Date().timeIntervalSince(deletedAt) > Self.undoWindow {
+                container.mainContext.delete(conversation)
+                purged = true
+            }
+        }
+        if purged { save() }
+        conversations = ConversationOrder.sorted(all.filter { $0.deletedAt == nil })
         if activeID == nil {
             activeID = conversations.first?.identifier
         }
@@ -255,6 +271,35 @@ final class AppSession {
     /// Dismisses a floating sidebar after it has been used; a docked one stays put.
     func dismissSidebarIfOverlaid() {
         if sidebarOverlaid { sidebarOpen = false }
+    }
+
+    // MARK: - Notices
+
+    /// Shows a notice, replacing any current one. Errors linger until tapped; anything with a
+    /// timeout clears itself.
+    func notify(_ text: String, actionLabel: String? = nil, autoDismiss: TimeInterval? = nil, action: (() -> Void)? = nil) {
+        noticeDismissal?.cancel()
+        let next = Notice(text: text, actionLabel: actionLabel, action: action, autoDismiss: autoDismiss)
+        notice = next
+        if let autoDismiss {
+            noticeDismissal = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(autoDismiss))
+                guard !Task.isCancelled, self?.notice == next else { return }
+                self?.notice = nil
+            }
+        }
+    }
+
+    func dismissNotice() {
+        noticeDismissal?.cancel()
+        notice = nil
+    }
+
+    /// Runs the notice's action (Undo) and clears it.
+    func performNoticeAction() {
+        let action = notice?.action
+        dismissNotice()
+        action?()
     }
 
     // MARK: - Conversations
@@ -338,16 +383,26 @@ final class AppSession {
         attachments.append(SkillInvocation.attachment(for: skill))
     }
 
+    /// Attaches a per-message tool as a chip and clears the `@query` token so the user can keep typing.
+    func attachTool(_ tool: ComposerTool) {
+        draft = MentionInvocation.removingQuery(from: draft)
+        attachments.removeAll { $0.kind == .tool && $0.name == tool.rawValue }
+        attachments.append(tool.attachment)
+    }
+
+    /// Hides the chat at once and offers Undo; the row is purged after `undoWindow`.
     func deleteConversation(_ conversation: Conversation) {
         stop(conversationID: conversation.identifier)
-        container.mainContext.delete(conversation)
+        let id = conversation.identifier
+        let title = conversation.title
+        conversation.deletedAt = .now
         save()
-        if activeID == conversation.identifier {
+        if activeID == id {
             activeID = nil
         }
-        unreadIDs.remove(conversation.identifier)
-        parkedDrafts[conversation.identifier] = nil
-        if infoConversationID == conversation.identifier { infoConversationID = nil }
+        unreadIDs.remove(id)
+        parkedDrafts[id] = nil
+        if infoConversationID == id { infoConversationID = nil }
         reloadConversations()
         if activeID == nil {
             if let first = conversations.first {
@@ -356,6 +411,38 @@ final class AppSession {
                 newChat()
             }
         }
+        notify("Deleted “\(title.prefix(32))”", actionLabel: "Undo", autoDismiss: 6) { [weak self] in
+            self?.restoreConversation(id)
+        }
+    }
+
+    func restoreConversation(_ id: UUID) {
+        let descriptor = FetchDescriptor<Conversation>(predicate: #Predicate { $0.identifier == id })
+        guard let conversation = (try? container.mainContext.fetch(descriptor))?.first, conversation.deletedAt != nil else { return }
+        conversation.deletedAt = nil
+        save()
+        reloadConversations()
+        select(id)
+    }
+
+    func renameConversation(_ conversation: Conversation, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        conversation.title = String(trimmed.prefix(80))
+        conversation.titleIsCustom = true
+        save()
+        reloadConversations()
+    }
+
+    func togglePin(_ conversation: Conversation) {
+        conversation.pinnedAt = conversation.pinnedAt == nil ? .now : nil
+        save()
+        reloadConversations()
+    }
+
+    /// Chats to show in the given sidebar bucket for the selected workspace.
+    func visibleConversations(pinned: Bool) -> [Conversation] {
+        visibleConversations.filter { ($0.pinnedAt != nil) == pinned }
     }
 
     // MARK: - Projects
@@ -435,7 +522,7 @@ final class AppSession {
             indexing = false
             indexPrompt = target
         } catch {
-            remoteNotice = error.localizedDescription
+            notify(error.localizedDescription)
         }
     }
 
@@ -515,13 +602,13 @@ final class AppSession {
                 switch result {
                 case .success(let attachment):
                     guard let entry = ProjectContext.knowledgeEntry(from: attachment) else {
-                        remoteNotice = "\(name) has no text to add as knowledge."
+                        notify("\(name) has no text to add as knowledge.")
                         return
                     }
                     var knowledge = target.knowledge.filter { $0.name != entry.name }
                     let total = knowledge.reduce(0) { $0 + ($1.text?.count ?? 0) } + (entry.text?.count ?? 0)
                     guard total <= ProjectContext.maxKnowledgeCharacters else {
-                        remoteNotice = "\(name) would push \(target.name)'s knowledge past its size limit."
+                        notify("\(name) would push \(target.name)'s knowledge past its size limit.")
                         return
                     }
                     knowledge.append(entry)
@@ -529,7 +616,7 @@ final class AppSession {
                     target.updatedAt = .now
                     save()
                 case .failure(let error):
-                    remoteNotice = error.localizedDescription
+                    notify(error.localizedDescription)
                 }
             }
         }
@@ -594,14 +681,23 @@ final class AppSession {
             attachments: attachments
         )
         insert(user, into: conversation)
-        if conversation.title == "New chat" {
-            conversation.title = String(text.prefix(48)).ifEmpty("New chat")
-        }
+        autoTitle(conversation, from: text)
         draft = ""
         lastCaptionDraft = ""
         attachments = []
         listen.resetAfterSend()
+        startTurn(in: conversation, apiKey: apiKey)
+    }
 
+    /// Titles a chat from its first message unless the user has named it.
+    private func autoTitle(_ conversation: Conversation, from text: String) {
+        guard conversation.titleIsCustom != true, conversation.title == "New chat" || conversation.messages.count <= 2 else { return }
+        conversation.title = String(text.prefix(48)).ifEmpty("New chat")
+    }
+
+    /// Streams a reply to the conversation as it stands. `model` overrides the composer's pick
+    /// for this one turn (regenerate with…).
+    private func startTurn(in conversation: Conversation, apiKey: String, model: ModelID? = nil) {
         let assistantID = UUID()
         let assistant = ChatTurn(
             id: assistantID,
@@ -623,7 +719,7 @@ final class AppSession {
             .sorted { $0.createdAt < $1.createdAt }
             .map { $0.asTurn() }
             .filter { $0.id != assistantID }
-        let stream = makeStream(for: conversation, history: history, apiKey: apiKey, token: request.token)
+        let stream = makeStream(for: conversation, history: history, apiKey: apiKey, token: request.token, model: model)
         let conversationID = conversation.identifier
         request.task = Task { [weak self] in
             guard let self else { return }
@@ -639,6 +735,77 @@ final class AppSession {
             }
             finish(conversationID: conversationID, request: request)
         }
+    }
+
+    // MARK: - Message actions
+
+    /// Ordered turns of the on-screen chat as lightweight ids + roles, for truncation math.
+    private func orderedMessages(in conversation: Conversation) -> [Message] {
+        conversation.messages.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// Cuts the thread after (or from) `messageID` and drops the Codex thread, whose history no
+    /// longer matches; `CodexPrompt` carries the surviving turns instead.
+    private func truncate(_ conversation: Conversation, at messageID: UUID, inclusive: Bool) {
+        stop(conversationID: conversation.identifier)
+        let ordered = orderedMessages(in: conversation)
+        let kept = Set(TurnTruncation.keep(ordered, at: messageID, inclusive: inclusive, key: \.identifier).map(\.identifier))
+        for message in ordered where !kept.contains(message.identifier) {
+            MarkdownDocumentStore.shared.forget(message.identifier)
+            container.mainContext.delete(message)
+        }
+        conversation.messages.removeAll { !kept.contains($0.identifier) }
+        conversation.codexThreadID = nil
+        conversation.updatedAt = .now
+        save()
+        reloadConversations()
+    }
+
+    /// Answers the message's prompt again, optionally with another model. Works on a failed
+    /// reply (Retry), a finished one (Regenerate), or a user turn (answer it again).
+    func regenerate(messageID: UUID, model: ModelID? = nil) {
+        guard let conversation = conversations.first(where: { $0.messages.contains { $0.identifier == messageID } }) else { return }
+        let ordered = orderedMessages(in: conversation)
+        guard let prompt = TurnTruncation.promptTurn(for: messageID, in: ordered, key: \.identifier, isUser: { $0.role == .user }) else { return }
+        guard let apiKey = APIKeyStore.load() else {
+            settingsOpen = true
+            return
+        }
+        truncate(conversation, at: prompt.identifier, inclusive: true)
+        startTurn(in: conversation, apiKey: apiKey, model: model)
+    }
+
+    /// Replaces a user turn's text and answers it again; everything after it goes.
+    func resend(userMessageID: UUID, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let conversation = conversations.first(where: { $0.messages.contains { $0.identifier == userMessageID } }),
+              let message = conversation.messages.first(where: { $0.identifier == userMessageID }),
+              message.role == .user,
+              !trimmed.isEmpty || !message.attachments.isEmpty
+        else { return }
+        guard let apiKey = APIKeyStore.load() else {
+            settingsOpen = true
+            return
+        }
+        truncate(conversation, at: userMessageID, inclusive: true)
+        message.content = trimmed
+        if orderedMessages(in: conversation).first?.identifier == userMessageID {
+            autoTitle(conversation, from: trimmed)
+        }
+        save()
+        startTurn(in: conversation, apiKey: apiKey)
+    }
+
+    /// Deletes the message and everything after it.
+    func deleteFromMessage(_ messageID: UUID) {
+        guard let conversation = conversations.first(where: { $0.messages.contains { $0.identifier == messageID } }) else { return }
+        truncate(conversation, at: messageID, inclusive: false)
+    }
+
+    /// Whether the message is the newest reply, the only one that can be regenerated in place.
+    func isLatestReply(_ message: Message) -> Bool {
+        guard let conversation = message.conversation else { return false }
+        return orderedMessages(in: conversation).last(where: { $0.role == .assistant })?.identifier == message.identifier
     }
 
     /// Cancels the in-flight turn immediately: tokens, process, and UI state. Does not wait for
@@ -664,10 +831,17 @@ final class AppSession {
         for conversation: Conversation,
         history: [ChatTurn],
         apiKey: String,
-        token: CancellationToken
+        token: CancellationToken,
+        model: ModelID? = nil
     ) -> AsyncThrowingStream<ChatStreamEvent, Error> {
-        let snapshot = settings
+        var snapshot = settings
+        if let model {
+            snapshot.model = model
+            snapshot.reasoningEffort = ModelCatalog.normalizeEffort(snapshot.reasoningEffort, for: model)
+        }
         let project = project(for: conversation)
+        let lastUserAttachments = history.last { $0.role == .user }?.attachments ?? []
+        let webSearch = snapshot.webSearchEnabled || ComposerTool.webSearch.isRequested(in: lastUserAttachments)
         if let project, let folder = project.codeFolder {
             guard let binary = CodexBinaryLocator.resolve(override: snapshot.codexPath) else {
                 return AsyncThrowingStream { continuation in
@@ -683,7 +857,7 @@ final class AppSession {
                 effort: snapshot.reasoningEffort,
                 projectPath: folder,
                 threadID: conversation.codexThreadID,
-                prompt: CodexPrompt.build(messages: messages, catalog: project.catalog, project: project.context),
+                prompt: CodexPrompt.build(messages: messages, catalog: project.catalog, project: project.context, webSearch: webSearch),
                 images: messages.last { $0.role == .user }?.attachments.filter(\.isImage) ?? []
             )
             return codex.stream(request, signal: token)
@@ -691,6 +865,7 @@ final class AppSession {
         var continuation = ChatContinuationBuilder.build(from: history)
         continuation.promptCacheKey = "cue-\(conversation.identifier.uuidString.lowercased())"
         continuation.project = project.map(\.context)
+        continuation.webSearch = webSearch
         return client.stream(apiKey: apiKey, settings: snapshot, continuation: continuation, signal: token)
     }
 
@@ -703,6 +878,36 @@ final class AppSession {
         if conversationID != activeID, conversations.contains(where: { $0.identifier == conversationID }) {
             unreadIDs.insert(conversationID)
         }
+    }
+
+    // MARK: - Keyboard
+
+    /// Closes the topmost overlay, or stops the on-screen reply when nothing is open. Returns
+    /// whether the key was used.
+    func dismissTopmost() -> Bool {
+        if previewAttachment != nil { previewAttachment = nil; return true }
+        if previewDiagram != nil { previewDiagram = nil; return true }
+        if infoConversationID != nil { infoConversationID = nil; return true }
+        if indexPrompt != nil { skipProjectIndex(); return true }
+        if newProjectPromptOpen { newProjectPromptOpen = false; return true }
+        if projectSettingsID != nil { projectSettingsID = nil; return true }
+        if searchOpen { searchOpen = false; return true }
+        if settingsOpen { settingsOpen = false; return true }
+        if notice != nil { dismissNotice(); return true }
+        if let activeID, streamingIDs.contains(activeID) {
+            stop(conversationID: activeID)
+            return true
+        }
+        return false
+    }
+
+    /// ⌘] / ⌘[: the next or previous chat in the sidebar's order, wrapping.
+    func selectAdjacentConversation(_ delta: Int) {
+        let visible = visibleConversations(pinned: true) + visibleConversations(pinned: false)
+        guard !visible.isEmpty else { return }
+        let current = visible.firstIndex { $0.identifier == activeID } ?? 0
+        let next = (current + delta + visible.count) % visible.count
+        select(visible[next].identifier)
     }
 
     // MARK: - Hotkeys
@@ -743,11 +948,11 @@ final class AppSession {
         case .toggleRemoteControl:
             guard let panel else { return }
             if !settings.passiveFocusMode {
-                remoteNotice = "Turn on Passive focus in Settings before remote control."
+                notify("Turn on Passive focus in Settings before remote control.")
                 return
             }
             remote.toggle(panel: panel, hotkeys: settings.hotkeyMap)
-            if let error = remote.lastError { remoteNotice = error }
+            if let error = remote.lastError { notify(error) }
         case .quitApp:
             quit()
         case .toggleAudioAuto:
@@ -806,7 +1011,7 @@ final class AppSession {
             attachments.append(MessageAttachment(id: UUID().uuidString, mimeType: shot.mimeType, name: shot.name, dataURL: shot.dataURL))
             panel.reveal(passive: settings.passiveFocusMode)
         } catch {
-            remoteNotice = error.localizedDescription
+            notify(error.localizedDescription)
         }
     }
 
@@ -816,7 +1021,7 @@ final class AppSession {
             let shot = try await ScreenshotService.captureRegion(hiding: panel)
             attachments.append(MessageAttachment(id: UUID().uuidString, mimeType: shot.mimeType, name: shot.name, dataURL: shot.dataURL))
         } catch {
-            remoteNotice = error.localizedDescription
+            notify(error.localizedDescription)
         }
     }
 
@@ -853,7 +1058,7 @@ final class AppSession {
                 case .success(let attachment):
                     addAttachment(attachment, to: targetID)
                 case .failure(let error):
-                    remoteNotice = error.localizedDescription
+                    notify(error.localizedDescription)
                 }
             }
         }
@@ -887,7 +1092,7 @@ final class AppSession {
         let existing = conversationID == activeID ? attachments : (conversationID.flatMap { parkedDrafts[$0]?.attachments } ?? [])
         let budget = existing.reduce(0) { $0 + ($1.promptText?.count ?? 0) } + (attachment.promptText?.count ?? 0)
         guard budget <= FileAttachmentImporter.maxMessageTextCharacters else {
-            remoteNotice = "\(attachment.name) would push this message past the attachment text limit."
+            notify("\(attachment.name) would push this message past the attachment text limit.")
             return
         }
         if conversationID == activeID || conversationID == nil {
@@ -1036,6 +1241,11 @@ final class AppSession {
             if message.content.isEmpty {
                 message.content = text
             }
+        case .citation(let citation):
+            var citations = message.citations
+            guard !citations.contains(where: { $0.url == citation.url }) else { return }
+            citations.append(citation)
+            message.citations = citations
         }
         conversation.updatedAt = .now
         request.lastSaveAt = Date()

@@ -11,7 +11,7 @@ nonisolated enum AttachmentPrompt {
         var files: [String] = []
         for attachment in attachments {
             switch attachment.kind {
-            case .image:
+            case .image, .tool:
                 continue
             case .pdf:
                 guard includePDFText else { continue }

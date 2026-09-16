@@ -8,6 +8,8 @@ nonisolated enum ChatStreamEvent: Sendable {
     case usage(TokenUsage, costUsd: Double, model: ModelID, effort: ReasoningEffort, webSearchCalls: Int, breakdown: CostBreakdown)
     case done(timing: ResponseTiming, responseID: String?, codexThreadID: String?)
     case error(String)
+    /// A web source the answer cites; one event per distinct URL, in the order they appear.
+    case citation(Citation)
 }
 
 struct ResponsesClient {
@@ -108,8 +110,16 @@ struct ResponsesClient {
             if let delta = payload["delta"] as? String { yield(.delta(delta)) }
         case "response.web_search_call.completed":
             state.webSearchCalls += 1
+        case "response.output_text.annotation.added":
+            if let citation = Self.citation(from: payload["annotation"]), state.noteCitation(citation) {
+                yield(.citation(citation))
+            }
         case "response.completed", "response.incomplete":
             if let response = payload["response"] as? [String: Any] {
+                // Annotations also ride on the final output; anything the stream missed lands here.
+                for citation in Self.citations(inOutput: response["output"]) where state.noteCitation(citation) {
+                    yield(.citation(citation))
+                }
                 emitUsage(from: response, settings: settings, state: state, yield: yield)
             }
         case "response.failed":
@@ -157,13 +167,13 @@ struct ResponsesClient {
     ) async throws {
         var body: [String: Any] = [
             "model": settings.model.rawValue,
-            "instructions": SystemInstruction.buildResponseInstructions(settings.systemInstruction, webSearchEnabled: settings.webSearchEnabled, project: continuation.project),
+            "instructions": SystemInstruction.buildResponseInstructions(settings.systemInstruction, webSearchEnabled: continuation.webSearch, project: continuation.project),
             "input": toResponseInput(useChain ? (continuation.inputMessages ?? continuation.messages) : continuation.messages),
             "reasoning": ["effort": settings.reasoningEffort.rawValue],
             "store": true,
             "stream": true
         ]
-        if settings.webSearchEnabled {
+        if continuation.webSearch {
             body["tools"] = [["type": "web_search"]]
             body["tool_choice"] = "auto"
         }
@@ -243,7 +253,7 @@ struct ResponsesClient {
                         "filename": attachment.name,
                         "file_data": attachment.dataURL
                     ])
-                case .document, .text, .skill:
+                case .document, .text, .skill, .tool:
                     continue
                 }
             }
@@ -268,6 +278,31 @@ struct ResponsesClient {
             cacheWriteTokens: details?["cache_write_tokens"] as? Int ?? 0,
             reasoningTokens: outputDetails?["reasoning_tokens"] as? Int ?? 0
         )
+    }
+
+    /// A `url_citation` annotation payload, or nil for any other annotation type.
+    static func citation(from raw: Any?) -> Citation? {
+        guard let annotation = raw as? [String: Any],
+              (annotation["type"] as? String) == "url_citation",
+              let url = annotation["url"] as? String, !url.isEmpty
+        else { return nil }
+        return Citation(
+            url: url,
+            title: annotation["title"] as? String ?? "",
+            startIndex: annotation["start_index"] as? Int,
+            endIndex: annotation["end_index"] as? Int
+        )
+    }
+
+    /// Every `url_citation` on a response's output items, in document order.
+    static func citations(inOutput output: Any?) -> [Citation] {
+        guard let items = output as? [[String: Any]] else { return [] }
+        return items.flatMap { item -> [Citation] in
+            guard let content = item["content"] as? [[String: Any]] else { return [] }
+            return content.flatMap { part -> [Citation] in
+                (part["annotations"] as? [Any] ?? []).compactMap { citation(from: $0) }
+            }
+        }
     }
 
     private func countWebSearchCalls(_ output: Any?) -> Int {
@@ -298,6 +333,12 @@ final class ResponseStreamState {
     var webSearchCalls = 0
     var responseID: String?
     var emittedUsage = false
+    private var citedURLs: Set<String> = []
+
+    /// True the first time a URL is seen, so each source is reported once.
+    func noteCitation(_ citation: Citation) -> Bool {
+        citedURLs.insert(citation.url).inserted
+    }
 }
 
 final class CancellationToken: @unchecked Sendable {
