@@ -219,6 +219,16 @@ final class ComposerTextView: NSTextView {
     var onFiles: ([URL]) -> Void = { _ in }
     var onImage: (NSImage) -> Void = { _ in }
 
+    /// Cue's panel takes key status while the interview app stays active, and macOS only routes
+    /// menu key equivalents to the *active* app's menu bar — so ⌘V never reaches Edit ▸ Paste
+    /// here. Dispatch the standard editing shortcuts ourselves, exactly as the menu would.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if let action = EditingShortcut.action(for: event), NSApp.sendAction(action, to: nil, from: self) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     /// Files and images on the pasteboard become attachments; anything else pastes as plain text.
     /// Like ChatGPT, an image copied from anywhere — a browser, Preview, a screenshot — lands as
     /// an attachment even when the source also put a caption or URL string alongside it.

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import CoreGraphics
 import Testing
@@ -224,5 +225,25 @@ struct PasteboardIntentTests {
     @Test func plainTextIsText() {
         #expect(PasteboardIntent.classify(types: ["public.utf8-plain-text"], hasFiles: false, hasString: true) == .text)
         #expect(PasteboardIntent.classify(types: [], hasFiles: false, hasString: false) == .text)
+    }
+}
+
+/// Edit shortcuts the composer has to dispatch itself, since Cue is rarely the active app.
+struct EditingShortcutTests {
+    @Test func commandLettersMapToEditActions() {
+        #expect(EditingShortcut.action(key: "v", command: true, shift: false, other: false) == #selector(NSText.paste(_:)))
+        #expect(EditingShortcut.action(key: "v", command: true, shift: true, other: false) == #selector(NSTextView.pasteAsPlainText(_:)))
+        #expect(EditingShortcut.action(key: "c", command: true, shift: false, other: false) == #selector(NSText.copy(_:)))
+        #expect(EditingShortcut.action(key: "x", command: true, shift: false, other: false) == #selector(NSText.cut(_:)))
+        #expect(EditingShortcut.action(key: "a", command: true, shift: false, other: false) == #selector(NSText.selectAll(_:)))
+        #expect(EditingShortcut.action(key: "z", command: true, shift: false, other: false) == Selector(("undo:")))
+        #expect(EditingShortcut.action(key: "z", command: true, shift: true, other: false) == Selector(("redo:")))
+    }
+
+    @Test func otherCombosAreLeftAlone() {
+        // Plain typing, and combos with ⌥/⌃ (Cue's own global hotkeys live there).
+        #expect(EditingShortcut.action(key: "v", command: false, shift: false, other: false) == nil)
+        #expect(EditingShortcut.action(key: "v", command: true, shift: false, other: true) == nil)
+        #expect(EditingShortcut.action(key: "n", command: true, shift: false, other: false) == nil)
     }
 }

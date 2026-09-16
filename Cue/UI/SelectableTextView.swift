@@ -382,4 +382,13 @@ final class SelectableNSTextView: NSTextView {
         if let window, !window.isKeyWindow { window.makeKey() }
         super.mouseDown(with: event)
     }
+
+    /// The Edit menu only sees key equivalents when Cue is the active app, which it usually is
+    /// not; ⌘C and ⌘A are dispatched here instead (see `EditingShortcut`).
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if let action = EditingShortcut.action(for: event), NSApp.sendAction(action, to: nil, from: self) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
