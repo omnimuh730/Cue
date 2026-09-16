@@ -108,54 +108,44 @@ struct RootView: View {
             }
         }
         .overlay(alignment: .top) {
-            if let notice = session.remoteNotice {
-                Text(notice)
-                    .font(.caption)
-                    .padding(8)
-                    .cueGlass(cornerRadius: 10)
-                    .padding(.top, 48)
-                    .onTapGesture { session.remoteNotice = nil }
+            if let notice = session.notice {
+                NoticeBanner(
+                    notice: notice,
+                    onAction: { session.performNoticeAction() },
+                    onDismiss: { session.dismissNotice() }
+                )
+                .padding(.top, 48)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .onAppear {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                if event.keyCode == 53, session.previewAttachment != nil {
-                    session.previewAttachment = nil
-                    return nil
+                if event.keyCode == 53 {
+                    // Overlays that own their own Escape (the search field, an editor) still see
+                    // it; anything else closes the topmost surface or stops the live reply.
+                    if session.searchOpen { return event }
+                    return session.dismissTopmost() ? nil : event
                 }
-                if event.keyCode == 53, session.previewDiagram != nil {
-                    session.previewDiagram = nil
-                    return nil
-                }
-                if event.keyCode == 53, session.infoConversationID != nil {
-                    session.infoConversationID = nil
-                    return nil
-                }
-                if event.keyCode == 53, session.indexPrompt != nil {
-                    session.skipProjectIndex()
-                    return nil
-                }
-                if event.keyCode == 53, session.newProjectPromptOpen {
-                    session.newProjectPromptOpen = false
-                    return nil
-                }
-                if event.keyCode == 53, session.projectSettingsID != nil {
-                    session.projectSettingsID = nil
-                    return nil
-                }
-                if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "n" {
+                guard event.modifierFlags.contains(.command) else { return event }
+                switch event.charactersIgnoringModifiers {
+                case "n":
                     session.newChat()
                     return nil
-                }
-                if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "k" {
+                case "k":
                     session.searchOpen = true
                     return nil
-                }
-                if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "," {
+                case ",":
                     session.settingsOpen = true
                     return nil
+                case "]":
+                    session.selectAdjacentConversation(1)
+                    return nil
+                case "[":
+                    session.selectAdjacentConversation(-1)
+                    return nil
+                default:
+                    return event
                 }
-                return event
             }
         }
         .frame(minWidth: 420, minHeight: 420)
@@ -205,5 +195,48 @@ private struct DropTargetOverlay: View {
                 .padding(CueTheme.sidebarInset)
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// The one transient message Cue shows: an error, a confirmation, or an "Undo".
+private struct NoticeBanner: View {
+    var notice: Notice
+    var onAction: () -> Void
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(notice.text)
+                .font(.system(size: 12))
+                .lineLimit(2)
+            if let label = notice.actionLabel {
+                Button(action: onAction) {
+                    Text(label)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 8)
+                        .frame(height: 22)
+                        .background(Color.accentColor.opacity(0.14), in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("z", modifiers: .command)
+            }
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .cueGlass(cornerRadius: 14, interactive: true)
+        .shadow(color: .black.opacity(0.16), radius: 16, y: 6)
+        .onTapGesture(perform: onDismiss)
     }
 }
