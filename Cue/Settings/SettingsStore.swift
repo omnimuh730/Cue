@@ -66,6 +66,15 @@ struct PublicSettings: Codable, Equatable, Sendable {
         set { storedReadingOrder = newValue }
     }
 
+    /// Whether listen output is also typed into the composer draft (the transcript strip shows
+    /// it either way). Stored optional for the same reason as `readingOrder`.
+    private var storedCaptionsToDraft: Bool?
+
+    var captionsToDraft: Bool {
+        get { storedCaptionsToDraft ?? true }
+        set { storedCaptionsToDraft = newValue }
+    }
+
     static let `default` = PublicSettings(
         model: .sol,
         reasoningEffort: .low,
@@ -80,7 +89,8 @@ struct PublicSettings: Codable, Equatable, Sendable {
         systemInstruction: "",
         hotkeys: Dictionary(uniqueKeysWithValues: HotkeyCatalog.defaults.map { ($0.key.rawValue, $0.value) }),
         codexPath: nil,
-        storedReadingOrder: nil
+        storedReadingOrder: nil,
+        storedCaptionsToDraft: nil
     )
 
     var hotkeyMap: HotkeyMap {

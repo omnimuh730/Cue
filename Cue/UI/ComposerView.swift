@@ -28,8 +28,20 @@ struct ComposerView: View {
                 )
                 .transition(.opacity)
             }
+            if showsTranscript {
+                TranscriptStrip(
+                    log: session.listen.transcript,
+                    listening: session.listen.status.armed,
+                    answerShortcut: HotkeyCatalog.displayLabel(for: session.settings.hotkeyMap[.answerLastSentence] ?? ""),
+                    onAnswer: { session.answerFromTranscript(sentences: 1) },
+                    onQuote: { session.quoteTranscript($0) },
+                    onClear: { session.listen.clearTranscript() }
+                )
+                .transition(.opacity)
+            }
             composer
         }
+        .animation(.easeInOut(duration: 0.15), value: showsTranscript)
         .frame(maxWidth: CueTheme.readingColumnMax)
         .frame(maxWidth: .infinity)
             .onChange(of: session.draft) { previous, next in
@@ -47,6 +59,11 @@ struct ComposerView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.12), value: skillQuery == nil)
+    }
+
+    /// The strip appears once listen is armed and stays while there is something heard to act on.
+    private var showsTranscript: Bool {
+        session.listen.status.armed || !session.listen.transcript.isEmpty
     }
 
     private func pickSkill(_ skill: SkillDefinition) {

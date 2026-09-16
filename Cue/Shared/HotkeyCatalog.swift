@@ -18,6 +18,9 @@ nonisolated enum HotkeyAction: String, Codable, CaseIterable, Sendable, Identifi
     case listenStartStop
     case listenOff
     case clearAudioCache
+    case answerLastSentence
+    case answerRecent
+    case answerAll
     case cycleModel
     case cycleEffort
     case sendMessage
@@ -69,7 +72,10 @@ nonisolated enum HotkeyCatalog {
         .init(id: .toggleAudioAuto, label: "Audio auto mode", description: "Toggle automatic VAD listening vs manual hotkey-only", group: .audio),
         .init(id: .listenStartStop, label: "Start / stop listening", description: "Arm or disarm speaker listen", group: .audio),
         .init(id: .listenOff, label: "Turn off listening", description: "Disarm speaker listen and stop manual capture", group: .audio),
-        .init(id: .clearAudioCache, label: "Clear audio / draft transcript", description: "Forget recording so far and clear the composer draft", group: .audio),
+        .init(id: .clearAudioCache, label: "Clear audio / draft transcript", description: "Forget recording so far, clear the transcript strip and the composer draft", group: .audio),
+        .init(id: .answerLastSentence, label: "Answer the last sentence", description: "Send the most recent sentence heard as a question", group: .audio),
+        .init(id: .answerRecent, label: "Answer the last 3 sentences", description: "Send the last three sentences heard as one question", group: .audio),
+        .init(id: .answerAll, label: "Answer everything new", description: "Send everything heard since the last answer or clear", group: .audio),
         .init(id: .cycleModel, label: "Cycle chat model", description: "Switch to the next OpenAI chat model", group: .chat),
         .init(id: .cycleEffort, label: "Cycle reasoning effort", description: "Switch to the next thinking effort", group: .chat),
         .init(id: .sendMessage, label: "Send message", description: "Send the draft, interrupting a live reply; stops if the composer is empty", group: .chat),
@@ -99,6 +105,9 @@ nonisolated enum HotkeyCatalog {
         .listenStartStop: "CommandOrControl+Alt+L",
         .listenOff: "CommandOrControl+Alt+Shift+L",
         .clearAudioCache: "CommandOrControl+Alt+Backspace",
+        .answerLastSentence: "CommandOrControl+num1",
+        .answerRecent: "CommandOrControl+num3",
+        .answerAll: "CommandOrControl+num0",
         .cycleModel: "CommandOrControl+Alt+Right",
         .cycleEffort: "CommandOrControl+Alt+E",
         .sendMessage: "CommandOrControl+Shift+Enter",

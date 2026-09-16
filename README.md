@@ -48,6 +48,8 @@ For Accessibility listen, also enable **Live Captions** (System Settings → Acc
 - **Apple Speech** — same audio path + SpeechAnalyzer
 - **Accessibility** — scrapes Apple Live Captions via AX (no audio in Cue)
 
+While listen is armed, a **Heard** strip above the composer shows the latest lines. Press **⌘num1** to answer the last sentence heard, **⌘num3** for the last three, or **⌘num0** for everything since the last answer; **Answer** in the strip does the same as ⌘num1, and clicking a line adds it to the draft. Anything you had typed is kept. Turn off **Settings → Listen → Insert speech into the draft** if you only want the strip.
+
 ## Validate
 
 Product logic is covered by `CueTests`. UITests launch the accessory app.
