@@ -16,6 +16,12 @@ final class Conversation {
     var projectID: UUID?
     /// Codex thread id so project follow-ups resume the same agent thread.
     var codexThreadID: String?
+    /// Set when pinned; pinned chats sort first, newest pin on top.
+    var pinnedAt: Date?
+    /// Soft delete: hidden at once, purged after the undo window.
+    var deletedAt: Date?
+    /// True once the user renamed the chat, so the first message no longer titles it.
+    var titleIsCustom: Bool?
     @Relationship(deleteRule: .cascade, inverse: \Message.conversation)
     var messages: [Message]
 

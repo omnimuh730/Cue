@@ -78,7 +78,11 @@ struct ChatView: View {
                             message: message,
                             mermaidAsCode: session.mermaidAsCode,
                             activity: session.activeActivity,
-                            onPreview: { session.previewAttachment = $0 }
+                            canRegenerate: message.role == .assistant && session.isLatestReply(message),
+                            onPreview: { session.previewAttachment = $0 },
+                            onRegenerate: { session.regenerate(messageID: message.identifier, model: $0) },
+                            onEdit: { session.resend(userMessageID: message.identifier, text: $0) },
+                            onDeleteFrom: { session.deleteFromMessage(message.identifier) }
                         )
                         .id(message.identifier)
                     }
@@ -126,6 +130,10 @@ struct ChatView: View {
                 historyExpanded = false
                 followBox.follow.jumpToLatest()
                 scrollToLatest(proxy)
+                jumpToTarget(proxy)
+            }
+            .onChange(of: session.scrollTarget) { _, _ in
+                jumpToTarget(proxy)
             }
             .onChange(of: readingOrder) { _, _ in
                 followBox.follow.jumpToLatest()
@@ -154,6 +162,23 @@ struct ChatView: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// Lands on the message a search hit pointed at, once, and unpins follow so streaming
+    /// growth does not pull the reader away from it (the geometry re-pins if it is the bottom).
+    private func jumpToTarget(_ proxy: ScrollViewProxy) {
+        guard let target = session.scrollTarget else { return }
+        session.scrollTarget = nil
+        if !historyExpanded, session.activeMessages.count > Self.historyWindow,
+           session.activeMessages.prefix(session.activeMessages.count - Self.historyWindow).contains(where: { $0.identifier == target }) {
+            historyExpanded = true
+        }
+        followBox.follow.pinnedToBottom = false
+        Task { @MainActor in
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(target, anchor: .center)
+            }
+        }
+    }
+
     /// Where a new turn lives: the bottom in chat order, the top in prompter order.
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
         guard followBox.follow.shouldFollow else { return }
@@ -175,10 +200,17 @@ struct MessageBubble: View {
     var mermaidAsCode: Bool
     /// Agent progress line shown before the first token arrives (Codex explore status).
     var activity: String? = nil
+    /// Only the newest reply can be answered again in place.
+    var canRegenerate = false
     var onPreview: (MessageAttachment) -> Void
+    var onRegenerate: (ModelID?) -> Void = { _ in }
+    var onEdit: (String) -> Void = { _ in }
+    var onDeleteFrom: () -> Void = {}
 
     @State private var hovering = false
     @State private var copied = false
+    @State private var editing = false
+    @State private var editText = ""
 
     private var role: MessageRole { message.role }
     private var status: MessageStatus? { message.status }
@@ -208,11 +240,15 @@ struct MessageBubble: View {
                     }
                 }
                 if role == .user {
-                    SelectableTextView(text: MarkdownTextBuilder.plain(message.content))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    copyRow
+                    if editing {
+                        editor
+                    } else {
+                        SelectableTextView(text: MarkdownTextBuilder.plain(message.content))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        actionRow
+                    }
                 } else {
                     if status == .streaming, message.content.isEmpty {
                         HStack(spacing: 8) {
@@ -225,10 +261,26 @@ struct MessageBubble: View {
                         .padding(.vertical, 4)
                         .animation(.easeInOut(duration: 0.18), value: activity)
                     } else if status == .error {
-                        Label(message.content, systemImage: "exclamationmark.circle")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.red)
-                            .textSelection(.enabled)
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Label(message.content, systemImage: "exclamationmark.circle")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.red)
+                                .textSelection(.enabled)
+                            // A failed turn is the one place the action stays visible: the
+                            // reader needs it now, not after finding the hover row.
+                            Button {
+                                onRegenerate(nil)
+                            } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 26)
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .cueGlass(cornerRadius: 13, interactive: true)
+                            .help("Send the question again")
+                        }
                     } else {
                         MarkdownMessageView(
                             messageID: message.identifier,
@@ -252,7 +304,7 @@ struct MessageBubble: View {
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
-                            copyRow
+                            actionRow
                         }
                     }
                 }
@@ -262,31 +314,109 @@ struct MessageBubble: View {
         .background { HoverRegion { hovering = $0 } }
     }
 
-    /// Copies the message as plain text. Revealed on hover so the reading column stays quiet.
-    private var copyRow: some View {
-        Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(MessageCopy.text(content: message.content, citations: message.citations), forType: .string)
-            copied = true
-            Task {
-                try? await Task.sleep(for: .seconds(1.4))
-                copied = false
+    /// Copy, then the actions that fit the role, then the time. Revealed on hover so the
+    /// reading column stays quiet; the row is one line and never taller than 22pt.
+    private var actionRow: some View {
+        HStack(spacing: 2) {
+            actionButton(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc", tint: copied ? .green : .secondary, help: "Copy message text") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(MessageCopy.text(content: message.content, citations: message.citations), forType: .string)
+                copied = true
+                Task {
+                    try? await Task.sleep(for: .seconds(1.4))
+                    copied = false
+                }
+            }
+            if role == .assistant, canRegenerate, status != .error {
+                regenerateMenu
+            }
+            if role == .user {
+                actionButton("Edit", symbol: "pencil", help: "Edit and send again; later turns are removed") {
+                    editText = message.content
+                    editing = true
+                }
+            }
+            actionButton("Delete", symbol: "trash", help: role == .user ? "Delete this message and everything after it" : "Delete this reply and everything after it") {
+                onDeleteFrom()
+            }
+            Text(message.createdAt.formatted(date: .omitted, time: .shortened))
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .padding(.leading, 6)
+                .help(message.createdAt.formatted(date: .abbreviated, time: .standard))
+        }
+        .opacity(hovering || copied ? 1 : 0)
+        .animation(.easeInOut(duration: 0.15), value: hovering || copied)
+    }
+
+    private var regenerateMenu: some View {
+        Menu {
+            Button("Regenerate") { onRegenerate(nil) }
+            Divider()
+            ForEach(ModelCatalog.models) { model in
+                Button(model.label) { onRegenerate(model.id) }
             }
         } label: {
-            Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+            Label("Regenerate", systemImage: "arrow.clockwise")
                 .font(.system(size: 11, weight: .medium))
                 .labelStyle(.titleAndIcon)
-                .foregroundStyle(copied ? Color.green : Color.secondary)
+                .foregroundStyle(Color.secondary)
+                .padding(.horizontal, 7)
+                .frame(height: 22)
+                .contentShape(Capsule())
+        } primaryAction: {
+            onRegenerate(nil)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.visible)
+        .fixedSize()
+        .background(Color.primary.opacity(hovering ? 0.06 : 0), in: Capsule())
+        .help("Answer again; the menu picks another model")
+        .accessibilityLabel("Regenerate")
+    }
+
+    private func actionButton(_ title: String, symbol: String, tint: Color = .secondary, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(tint)
                 .padding(.horizontal, 7)
                 .frame(height: 22)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .background(Color.primary.opacity(hovering ? 0.06 : 0), in: Capsule())
-        .opacity(hovering || copied ? 1 : 0)
-        .animation(.easeInOut(duration: 0.15), value: hovering || copied)
-        .help("Copy message text")
-        .accessibilityLabel("Copy message")
+        .help(help)
+        .accessibilityLabel(title)
+    }
+
+    /// In-place editor for a user turn. Save sends it again (⌘⏎); Cancel (esc) keeps the original.
+    private var editor: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            TextEditor(text: $editText)
+                .font(.system(size: 15))
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 60, maxHeight: 240)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1))
+            HStack(spacing: 8) {
+                Button("Cancel") { editing = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Send") {
+                    editing = false
+                    onEdit(editText)
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .buttonStyle(.borderedProminent)
+                .disabled(editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && message.attachments.isEmpty)
+            }
+            .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
