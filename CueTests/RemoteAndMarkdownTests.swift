@@ -135,7 +135,8 @@ struct RemoteAndMarkdownTests {
     }
 
     @Test func mermaidZoomMathClampsAndConverts() {
-        #expect(MermaidZoom.clamp(0.2) == 1)
+        // Excalidraw's range: 10% to 3000%.
+        #expect(MermaidZoom.clamp(0.02) == MermaidZoom.minScale)
         #expect(MermaidZoom.clamp(3) == 3)
         #expect(MermaidZoom.clamp(50) == MermaidZoom.maxScale)
         #expect(MermaidZoom.clamp(.nan) == 1)
@@ -145,19 +146,36 @@ struct RemoteAndMarkdownTests {
         #expect(MermaidZoom.factor(forScrollDelta: 200, precise: true) == 2)
         #expect(abs(MermaidZoom.factor(forScrollDelta: -20, precise: false) - 0.5) < 0.0001)
 
-        // Natural scrolling: content down/right (positive deltas) is a negative page scroll, in CSS px.
-        let pan = MermaidZoom.panDelta(scrollDeltaX: 10, scrollDeltaY: -4, magnification: 2)
-        #expect(pan.width == -5)
-        #expect(pan.height == 2)
+        // Trackpad points move the canvas as-is; a mouse notch in lines is widened.
+        #expect(MermaidZoom.panPoints(scrollDeltaX: 10, scrollDeltaY: -4, precise: true) == CGSize(width: 10, height: -4))
+        #expect(MermaidZoom.panPoints(scrollDeltaX: 1, scrollDeltaY: -3, precise: false) == CGSize(width: 10, height: -30))
+        #expect(MermaidZoom.panPoints(scrollDeltaX: .nan, scrollDeltaY: 1, precise: true) == .zero)
 
-        // Dragging right/down (flipped view space) keeps content under the cursor: the page scrolls left/up.
-        let anchor = CGPoint(x: 100, y: 80)
-        let target = MermaidZoom.dragScrollTarget(anchorScroll: anchor, start: CGPoint(x: 0, y: 0), current: CGPoint(x: 30, y: 10), magnification: 2)
-        #expect(target.x == 85)
-        #expect(target.y == 75)
-        // Never scrolls past the page origin.
-        let clamped = MermaidZoom.dragScrollTarget(anchorScroll: .zero, start: .zero, current: CGPoint(x: 50, y: 50), magnification: 1)
-        #expect(clamped == .zero)
+        #expect(MermaidZoom.percent(0.724) == 72)
+        #expect(MermaidZoom.percent(1) == 100)
+        #expect(MermaidZoom.percent(.infinity) == 100)
+    }
+
+    @Test func mermaidInlineHeightFollowsTheDiagramWithinBounds() {
+        #expect(MermaidCanvasLayout.inlineHeight(for: 300.2) == 301)
+        #expect(MermaidCanvasLayout.inlineHeight(for: 20) == MermaidCanvasLayout.minHeight)
+        #expect(MermaidCanvasLayout.inlineHeight(for: 5000) == MermaidCanvasLayout.maxHeight)
+        #expect(MermaidCanvasLayout.inlineHeight(for: .nan) == MermaidCanvasLayout.defaultHeight)
+    }
+
+    @Test func codeLineNumbersFollowSourceLines() {
+        #expect(CodeLineNumbers.lineStarts(in: "") == [0])
+        #expect(CodeLineNumbers.lineStarts(in: "a\nbb\nccc") == [0, 2, 5])
+        // A trailing newline leaves an empty final line, as an editor shows it.
+        #expect(CodeLineNumbers.lineStarts(in: "a\n") == [0, 2])
+        // Offsets count UTF-16 units, the way TextKit addresses characters.
+        #expect(CodeLineNumbers.lineStarts(in: "😀\nx") == [0, 3])
+
+        // At least two digits of room, then one more per order of magnitude.
+        let two = CodeLineNumbers.gutterWidth(lineCount: 9, digitWidth: 7)
+        #expect(two == 14 + CodeLineNumbers.leadingInset + CodeLineNumbers.trailingInset)
+        #expect(CodeLineNumbers.gutterWidth(lineCount: 99, digitWidth: 7) == two)
+        #expect(CodeLineNumbers.gutterWidth(lineCount: 100, digitWidth: 7) == two + 7)
     }
 }
 

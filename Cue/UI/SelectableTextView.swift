@@ -59,12 +59,12 @@ nonisolated enum MarkdownTextBuilder {
         ])
     }
 
-    /// Monospaced text for a fenced block. `CodeBlockView` draws its own frame, so this carries
-    /// no background or block margins.
+    /// Monospaced text for a fenced block. `CodeBlockView` draws its own frame and line numbers,
+    /// so this carries no background or block margins. Long lines wrap to the column.
     static func code(_ source: String, color: NSColor = .labelColor) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 3
-        style.lineBreakMode = .byClipping
+        style.lineBreakMode = .byWordWrapping
         return NSAttributedString(string: source, attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: codeSize, weight: .regular),
             .foregroundColor: color,
@@ -239,6 +239,38 @@ struct SelectableTextView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> SelectableNSTextView {
+        let view = SelectableNSTextView.make(wraps: wraps)
+        let value = shown
+        view.textStorage?.setAttributedString(value)
+        view.noteFadedTail(value.length < text.length ? StreamingTextReveal.fadeSpan : 0)
+        return view
+    }
+
+    func updateNSView(_ view: SelectableNSTextView, context: Context) {
+        let value = shown
+        // A withheld tail means the ramp is in play; once nothing is withheld the text is solid.
+        let faded = value.length < text.length ? StreamingTextReveal.fadeSpan : 0
+        if view.apply(value, fadedTail: faded) {
+            view.invalidateIntrinsicContentSize()
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: SelectableNSTextView, context: Context) -> CGSize? {
+        guard wraps else { return nsView.naturalSize() }
+        let width = proposal.width ?? nsView.bounds.width
+        return CGSize(width: width, height: nsView.height(forWidth: width))
+    }
+}
+
+final class SelectableNSTextView: NSTextView {
+    /// False for text that keeps its line breaks and scrolls horizontally instead.
+    var wrapsText = true
+    private var lastWidth: CGFloat = -1
+    private var lastHeight: CGFloat = 0
+
+    /// A read-only, selectable text view with its own TextKit stack and no insets, so line
+    /// fragments sit exactly where the view's coordinates say they do.
+    static func make(wraps: Bool) -> SelectableNSTextView {
         let storage = NSTextStorage()
         let layoutManager = NSLayoutManager()
         storage.addLayoutManager(layoutManager)
@@ -267,33 +299,8 @@ struct SelectableTextView: NSViewRepresentable {
         view.wrapsText = wraps
         view.focusRingType = .none
         view.setAccessibilityRole(.staticText)
-        let value = shown
-        view.textStorage?.setAttributedString(value)
-        view.noteFadedTail(value.length < text.length ? StreamingTextReveal.fadeSpan : 0)
         return view
     }
-
-    func updateNSView(_ view: SelectableNSTextView, context: Context) {
-        let value = shown
-        // A withheld tail means the ramp is in play; once nothing is withheld the text is solid.
-        let faded = value.length < text.length ? StreamingTextReveal.fadeSpan : 0
-        if view.apply(value, fadedTail: faded) {
-            view.invalidateIntrinsicContentSize()
-        }
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: SelectableNSTextView, context: Context) -> CGSize? {
-        guard wraps else { return nsView.naturalSize() }
-        let width = proposal.width ?? nsView.bounds.width
-        return CGSize(width: width, height: nsView.height(forWidth: width))
-    }
-}
-
-final class SelectableNSTextView: NSTextView {
-    /// False for code blocks, which keep their line breaks and scroll horizontally instead.
-    var wrapsText = true
-    private var lastWidth: CGFloat = -1
-    private var lastHeight: CGFloat = 0
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: lastHeight)

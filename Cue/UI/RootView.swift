@@ -22,6 +22,7 @@ struct RootView: View {
                             .safeAreaInset(edge: .top, spacing: 0) {
                                 Color.clear.frame(height: CueTheme.headerHeight)
                             }
+                            .environment(\.expandDiagram) { session.previewDiagram = $0 }
                         ComposerView(session: session)
                             .padding(.horizontal, CueTheme.composerInset)
                             .padding(.bottom, CueTheme.composerInset)
@@ -60,6 +61,11 @@ struct RootView: View {
             if let preview = session.previewAttachment {
                 AttachmentPreviewOverlay(attachment: preview) {
                     session.previewAttachment = nil
+                }
+            }
+            if let diagram = session.previewDiagram {
+                MermaidPreviewOverlay(source: diagram) {
+                    session.previewDiagram = nil
                 }
             }
             if let infoID = session.infoConversationID,
@@ -115,6 +121,10 @@ struct RootView: View {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 if event.keyCode == 53, session.previewAttachment != nil {
                     session.previewAttachment = nil
+                    return nil
+                }
+                if event.keyCode == 53, session.previewDiagram != nil {
+                    session.previewDiagram = nil
                     return nil
                 }
                 if event.keyCode == 53, session.infoConversationID != nil {

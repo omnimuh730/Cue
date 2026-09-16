@@ -55,6 +55,8 @@ final class AppSession {
     var settingsOpen = false
     var searchOpen = false
     var previewAttachment: MessageAttachment?
+    /// Mermaid source shown across the window by the diagram preview overlay.
+    var previewDiagram: String?
     /// Files still being read for the composer; each shows a placeholder chip.
     private(set) var importingNames: [String] = []
     /// Conversation whose thread info sheet is open.
