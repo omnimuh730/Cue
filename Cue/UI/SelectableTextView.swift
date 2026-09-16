@@ -37,16 +37,175 @@ nonisolated enum MarkdownTextBuilder {
                 style.paragraphSpacingBefore += isFirst ? 0 : (level <= 2 ? 6 : 2)
                 style.lineSpacing = 2
                 output.append(inline(value, baseFont: font, color: textColor, paragraph: style))
-            case .code(_, let source):
+            case .code(_, let source, _):
                 output.append(codeBlock(source, color: textColor, isFirst: isFirst))
             case .mermaid(let source):
                 // Callers split runs at Mermaid blocks; if one slips through, show its source.
                 output.append(codeBlock(source, color: textColor, isFirst: isFirst))
+            case .list(_, let items):
+                output.append(list(items, color: textColor, isFirst: isFirst))
+            case .blockquote(let paragraphs):
+                output.append(blockquote(paragraphs, isFirst: isFirst))
+            case .table(let header, let alignments, let rows):
+                output.append(table(header: header, alignments: alignments, rows: rows, color: textColor, isFirst: isFirst))
+            case .rule:
+                output.append(rule(isFirst: isFirst))
             }
             if index != blocks.count - 1 { output.append(NSAttributedString(string: "\n")) }
         }
         return output
     }
+
+    // MARK: Lists
+
+    /// Indent per nesting level and the gap between a marker and its text.
+    static let listIndentStep: CGFloat = 20
+    static let listMarkerWidth: CGFloat = 22
+
+    /// Each item is one paragraph: marker, tab, text. The hanging indent makes wrapped lines
+    /// align under the first word rather than the marker, and the tab stop keeps every marker
+    /// column straight whether it is "•", "10.", or "☑".
+    private static func list(_ items: [RenderedListItem], color: NSColor, isFirst: Bool) -> NSAttributedString {
+        let output = NSMutableAttributedString()
+        let font = NSFont.systemFont(ofSize: bodySize)
+        for (index, item) in items.enumerated() {
+            let indent = CGFloat(item.level) * listIndentStep
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = bodyLineSpacing
+            style.lineBreakMode = .byWordWrapping
+            style.firstLineHeadIndent = indent
+            style.headIndent = indent + listMarkerWidth
+            style.tabStops = [NSTextTab(textAlignment: .left, location: indent + listMarkerWidth)]
+            style.defaultTabInterval = listMarkerWidth
+            style.paragraphSpacingBefore = index == 0 ? (isFirst ? 0 : blockGap) : 3
+            let markerColor = item.marker == "•" ? NSColor.secondaryLabelColor : color
+            output.append(NSAttributedString(string: item.marker + "\t", attributes: [
+                .font: font,
+                .foregroundColor: markerColor,
+                .paragraphStyle: style
+            ]))
+            output.append(inline(item.text, baseFont: font, color: color, paragraph: style))
+            if index != items.count - 1 { output.append(NSAttributedString(string: "\n")) }
+        }
+        return output
+    }
+
+    // MARK: Block quotes
+
+    /// Inset from the column edge to the quote's text; the bar is drawn in that gap.
+    static let quoteInset: CGFloat = 16
+
+    /// Secondary text, indented, tagged with `quoteAttribute` so `SelectableNSTextView` draws a
+    /// bar down its left. Paragraphs are joined with line separators rather than newlines: the
+    /// tag then runs unbroken over the whole quote and the bar spans it as one piece.
+    private static func blockquote(_ paragraphs: [AttributedString], isFirst: Bool) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = bodyLineSpacing
+        style.lineBreakMode = .byWordWrapping
+        style.firstLineHeadIndent = quoteInset
+        style.headIndent = quoteInset
+        style.paragraphSpacingBefore = isFirst ? 0 : blockGap
+        let font = NSFont.systemFont(ofSize: bodySize)
+        let output = NSMutableAttributedString()
+        for (index, paragraph) in paragraphs.enumerated() {
+            output.append(inline(paragraph, baseFont: font, color: .secondaryLabelColor, paragraph: style))
+            if index != paragraphs.count - 1 {
+                output.append(NSAttributedString(string: "\u{2028}\u{2028}", attributes: [
+                    .font: font,
+                    .paragraphStyle: style
+                ]))
+            }
+        }
+        output.addAttribute(quoteAttribute, value: true, range: NSRange(location: 0, length: output.length))
+        return output
+    }
+
+    // MARK: Tables
+
+    /// An `NSTextTable` with one `NSTextTableBlock` per cell. Cells wrap to the column width
+    /// instead of scrolling — right for a window that is often narrow — and the whole table
+    /// selects and copies as text, row by row.
+    private static func table(
+        header: [AttributedString],
+        alignments: [TableAlignment],
+        rows: [[AttributedString]],
+        color: NSColor,
+        isFirst: Bool
+    ) -> NSAttributedString {
+        let columns = max(1, header.count)
+        let table = NSTextTable()
+        table.numberOfColumns = columns
+        table.collapsesBorders = true
+        table.layoutAlgorithm = .automaticLayoutAlgorithm
+        table.setWidth(isFirst ? 0 : blockGap, type: .absoluteValueType, for: .margin, edge: .minY)
+
+        let output = NSMutableAttributedString()
+        let hairline = NSColor.labelColor.withAlphaComponent(0.14)
+        let allRows = [header] + rows
+        for (rowIndex, row) in allRows.enumerated() {
+            let isHeader = rowIndex == 0
+            for column in 0..<columns {
+                let cell = NSTextTableBlock(table: table, startingRow: rowIndex, rowSpan: 1, startingColumn: column, columnSpan: 1)
+                cell.setWidth(1, type: .absoluteValueType, for: .border)
+                cell.setBorderColor(hairline)
+                cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .minY)
+                cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .maxY)
+                cell.setWidth(8, type: .absoluteValueType, for: .padding, edge: .minX)
+                cell.setWidth(8, type: .absoluteValueType, for: .padding, edge: .maxX)
+                if isHeader { cell.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05) }
+
+                let style = NSMutableParagraphStyle()
+                style.textBlocks = [cell]
+                style.lineSpacing = 2
+                style.lineBreakMode = .byWordWrapping
+                switch column < alignments.count ? alignments[column] : .left {
+                case .left: style.alignment = .left
+                case .center: style.alignment = .center
+                case .right: style.alignment = .right
+                }
+                let font = isHeader
+                    ? NSFont.systemFont(ofSize: bodySize - 1, weight: .semibold)
+                    : NSFont.systemFont(ofSize: bodySize - 1)
+                let content = column < row.count ? row[column] : AttributedString()
+                let text = inline(content, baseFont: font, color: color, paragraph: style)
+                if text.length == 0 {
+                    // An empty cell still needs a paragraph to draw its borders.
+                    output.append(NSAttributedString(string: "\u{200B}", attributes: [
+                        .font: font,
+                        .foregroundColor: color,
+                        .paragraphStyle: style
+                    ]))
+                } else {
+                    output.append(text)
+                }
+                let isLastCell = rowIndex == allRows.count - 1 && column == columns - 1
+                if !isLastCell { output.append(NSAttributedString(string: "\n")) }
+            }
+        }
+        return output
+    }
+
+    // MARK: Rules
+
+    /// One short, blank paragraph tagged with `ruleAttribute`; the text view draws the hairline
+    /// across it. The no-break space gives the paragraph a glyph, so it gets a line fragment.
+    private static func rule(isFirst: Bool) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacingBefore = isFirst ? 0 : blockGap
+        style.minimumLineHeight = 9
+        style.maximumLineHeight = 9
+        return NSAttributedString(string: "\u{00A0}", attributes: [
+            .font: NSFont.systemFont(ofSize: 6),
+            .foregroundColor: NSColor.clear,
+            .paragraphStyle: style,
+            ruleAttribute: true
+        ])
+    }
+
+    /// Custom attributes for decorations TextKit does not draw for us (on this OS a plain
+    /// `NSTextBlock` lays out its padding but never paints borders or backgrounds).
+    static let quoteAttribute = NSAttributedString.Key("cue.quote")
+    static let ruleAttribute = NSAttributedString.Key("cue.rule")
 
     static func plain(_ text: String, size: CGFloat = 15, color: NSColor = .labelColor) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
@@ -61,15 +220,24 @@ nonisolated enum MarkdownTextBuilder {
 
     /// Monospaced text for a fenced block. `CodeBlockView` draws its own frame and line numbers,
     /// so this carries no background or block margins. Long lines wrap to the column.
-    static func code(_ source: String, color: NSColor = .labelColor) -> NSAttributedString {
+    static func code(_ source: String, spans: [HighlightSpan] = [], color: NSColor = .labelColor) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 3
         style.lineBreakMode = .byWordWrapping
-        return NSAttributedString(string: source, attributes: [
+        let output = NSMutableAttributedString(string: source, attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: codeSize, weight: .regular),
             .foregroundColor: color,
             .paragraphStyle: style
         ])
+        let length = output.length
+        for span in spans where span.range.upperBound <= length {
+            output.addAttribute(
+                .foregroundColor,
+                value: CodeTheme.color(for: span.token),
+                range: NSRange(location: span.range.lowerBound, length: span.range.count)
+            )
+        }
+        return output
     }
 
     private static func body(isFirst: Bool) -> NSMutableParagraphStyle {
@@ -133,6 +301,22 @@ nonisolated enum MarkdownTextBuilder {
             .foregroundColor: color,
             .paragraphStyle: style
         ])
+    }
+}
+
+/// Six semantic colors for code, all system dynamic colors so they hold up in light and dark
+/// and under Reduce Transparency. Deliberately few: the column should stay calm, not festive.
+nonisolated enum CodeTheme {
+    static func color(for token: HighlightToken) -> NSColor {
+        switch token {
+        case .keyword: .systemPurple
+        case .string: .systemRed
+        case .comment: .secondaryLabelColor
+        case .number: .systemBlue
+        case .type: .systemTeal
+        case .attribute: .systemOrange
+        case .tag: .systemIndigo
+        }
     }
 }
 
@@ -308,6 +492,38 @@ final class SelectableNSTextView: NSTextView {
 
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        drawDecorations()
+    }
+
+    /// Quote bars and rules. Both live beside or between glyphs, never under them, so drawing
+    /// after the text is fine.
+    private func drawDecorations() {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 else { return }
+        let origin = textContainerOrigin
+        let full = NSRange(location: 0, length: storage.length)
+        storage.enumerateAttribute(MarkdownTextBuilder.quoteAttribute, in: full) { value, range, _ in
+            guard value as? Bool == true else { return }
+            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let bounds = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+            guard !bounds.isEmpty else { return }
+            let bar = NSRect(x: origin.x, y: bounds.minY + origin.y, width: 3, height: bounds.height)
+            NSColor.tertiaryLabelColor.setFill()
+            NSBezierPath(roundedRect: bar, xRadius: 1.5, yRadius: 1.5).fill()
+        }
+        storage.enumerateAttribute(MarkdownTextBuilder.ruleAttribute, in: full) { value, range, _ in
+            guard value as? Bool == true else { return }
+            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphs.length > 0 else { return }
+            let line = layoutManager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+            let y = (line.midY + origin.y).rounded() - 0.5
+            let rule = NSRect(x: origin.x, y: y, width: textContainer.size.width, height: 1)
+            NSColor.labelColor.withAlphaComponent(0.14).setFill()
+            rule.fill()
+        }
+    }
 
     /// Characters at the end of the storage that carry the streaming fade ramp. They have to be
     /// rewritten even when their glyphs did not change, or the ramp freezes into the message.

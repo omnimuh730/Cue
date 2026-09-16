@@ -85,7 +85,10 @@ struct RemoteAndMarkdownTests {
         #expect(blocks[0] == .paragraph("Here's a design:"))
         #expect(blocks[1] == .mermaid("flowchart TD\n  A --> B"))
         #expect(blocks[2] == .heading(level: 3, "Typical trip flow"))
-        #expect(blocks[3] == .paragraph("1. Rider opens app\n2. Match"))
+        #expect(blocks[3] == .list(ordered: true, items: [
+            ListItem(level: 0, marker: "1.", text: "Rider opens app"),
+            ListItem(level: 0, marker: "2.", text: "Match")
+        ]))
         #expect(blocks[4] == .code(language: "swift", "let x = 1"))
         #expect(blocks[5] == .paragraph("Trailing text"))
     }
@@ -266,7 +269,7 @@ struct SelectableTextTests {
         let segments = MessageSegment.group(blocks)
         #expect(segments.count == 4)
         guard case .text(_, let first) = segments[0],
-              case .code(_, let language, let code) = segments[1],
+              case .code(_, let language, let code, _) = segments[1],
               case .mermaid(_, let diagram) = segments[2],
               case .text(_, let last) = segments[3]
         else {
