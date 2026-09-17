@@ -8,7 +8,7 @@ struct ComposerView: View {
     @State private var toolIndex = 0
     @State private var toolPickerDismissed = false
 
-    /// Text after a leading `/`, while the user is still typing a skill name.
+    /// Text after a `/` the user is typing, anywhere in the draft, while the skill name is still open.
     private var skillQuery: String? {
         skillPickerDismissed ? nil : SkillInvocation.query(in: session.draft)
     }
@@ -208,9 +208,11 @@ struct ComposerView: View {
                     Image(systemName: session.composerPrimaryAction == .stop ? "stop.fill" : "arrow.up")
                         .font(.system(size: 13, weight: .bold))
                         .frame(width: 34, height: 34)
+                        .background(session.composerPrimaryAction == .stop ? Color.red.opacity(0.85) : Color.accentColor, in: Circle())
+                        // Plain buttons hit-test only the glyph; make the whole disc clickable.
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .background(session.composerPrimaryAction == .stop ? Color.red.opacity(0.85) : Color.accentColor, in: Circle())
                 .foregroundStyle(.white)
                 .help(session.composerPrimaryAction == .stop ? "Stop this response" : "Send")
                 .animation(.easeInOut(duration: 0.15), value: session.composerPrimaryAction)
@@ -258,6 +260,7 @@ struct ComposerView: View {
         } label: {
             Image(systemName: "paperclip")
                 .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Attach files: PDF, Word, Excel, PowerPoint, images, or text. You can also drop or paste files here.")
@@ -270,6 +273,7 @@ struct ComposerView: View {
         } label: {
             Image(systemName: session.listen.status.armed ? "waveform.badge.mic" : "waveform")
                 .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Arm listen")

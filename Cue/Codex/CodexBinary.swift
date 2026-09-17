@@ -95,9 +95,13 @@ nonisolated enum CodexBinaryLocator {
         return roots
     }
 
+    /// Every place npm has put the native binary: the platform package hoisted next to
+    /// `@openai/codex`, nested under it as an optional dependency (npm ≥ 0.150), or vendored
+    /// inside the main package itself (older releases).
     private static func vendorCandidates(nodeModules root: String) -> [String] {
         [
             "\(root)/@openai/\(npmPlatformPackage)/vendor/\(vendorTriple)/bin/codex",
+            "\(root)/@openai/codex/node_modules/@openai/\(npmPlatformPackage)/vendor/\(vendorTriple)/bin/codex",
             "\(root)/@openai/codex/vendor/\(vendorTriple)/bin/codex",
             "\(root)/@openai/codex/vendor/\(vendorTriple)/codex/codex"
         ]

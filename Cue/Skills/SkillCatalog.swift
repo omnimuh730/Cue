@@ -129,15 +129,28 @@ nonisolated enum SkillCatalog {
     }
 }
 
-/// `/query` at the start of the draft opens the skill picker.
+/// `/query` starting a word anywhere in the draft opens the skill picker.
 nonisolated enum SkillInvocation {
-    /// The text after the leading slash while the user is still typing the skill name; nil once
-    /// the token ends (whitespace) or the draft does not start with `/`.
+    /// The partial name after the `/` the user is typing, or nil when no invocation is open. The
+    /// `/` must start a word (start of draft or after whitespace) and the token must still be
+    /// unbroken by whitespace, so `2/3`, a path, or a regex like `/G^3i/` stays plain text.
     static func query(in draft: String) -> String? {
-        guard draft.hasPrefix("/") else { return nil }
-        let token = draft.dropFirst()
+        guard let slash = draft.lastIndex(of: "/") else { return nil }
+        if slash > draft.startIndex {
+            let before = draft[draft.index(before: slash)]
+            guard before.isWhitespace || before.isNewline else { return nil }
+        }
+        let token = draft[draft.index(after: slash)...]
         guard !token.contains(where: \.isWhitespace) else { return nil }
         return String(token)
+    }
+
+    /// The draft with the open `/query` token removed (and the space before it, if any).
+    static func removingQuery(from draft: String) -> String {
+        guard let slash = draft.lastIndex(of: "/"), query(in: draft) != nil else { return draft }
+        var result = String(draft[..<slash])
+        while result.last == " " { result.removeLast() }
+        return result
     }
 
     /// Case-insensitive subsequence match, scored so prefix matches sort first.

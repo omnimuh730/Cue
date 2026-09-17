@@ -376,9 +376,7 @@ final class AppSession {
 
     /// Attaches the skill as a chip and clears the `/query` token so the user can type the request.
     func attachSkill(_ skill: SkillDefinition) {
-        if let query = SkillInvocation.query(in: draft) {
-            draft = String(draft.dropFirst(query.count + 1)).trimmingCharacters(in: .whitespaces)
-        }
+        draft = SkillInvocation.removingQuery(from: draft)
         attachments.removeAll { $0.kind == .skill && $0.name == skill.name }
         attachments.append(SkillInvocation.attachment(for: skill))
     }

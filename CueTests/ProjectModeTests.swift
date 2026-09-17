@@ -214,4 +214,32 @@ struct ProjectModeTests {
         let direct = CodexBinaryLocator.resolve(override: binary.path, environment: ["PATH": ""])
         #expect(direct?.executable == binary.resolvingSymlinksInPath().path)
     }
+
+    /// npm ≥ 0.150 nests the platform package under `@openai/codex/node_modules` instead of hoisting it.
+    @Test func codexLocatorUnwrapsShimWithNestedPlatformPackage() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("cue-codex-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let package = root.appendingPathComponent("node_modules/@openai/codex")
+        let shimDir = package.appendingPathComponent("bin")
+        let vendorDir = package.appendingPathComponent("node_modules/@openai/\(CodexBinaryLocator.npmPlatformPackage)/vendor/\(CodexBinaryLocator.vendorTriple)/bin")
+        try fm.createDirectory(at: shimDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: vendorDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: vendorDir.deletingLastPathComponent().appendingPathComponent("codex-path"), withIntermediateDirectories: true)
+        let shim = shimDir.appendingPathComponent("codex.js")
+        try "#!/usr/bin/env node\n".write(to: shim, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shim.path)
+        let binary = vendorDir.appendingPathComponent("codex")
+        try Data([0xCF, 0xFA, 0xED, 0xFE, 0, 0, 0, 0]).write(to: binary)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
+        // The PATH entry is a symlink to the shim, as `npm i -g` lays it out.
+        let binDir = root.appendingPathComponent("bin")
+        try fm.createDirectory(at: binDir, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: binDir.appendingPathComponent("codex"), withDestinationURL: shim)
+
+        let resolved = CodexBinaryLocator.resolve(override: nil, environment: ["PATH": binDir.path])
+        #expect(resolved?.executable == binary.resolvingSymlinksInPath().path)
+        #expect(resolved?.pathDirectories.contains { $0.hasSuffix("codex-path") } == true)
+        #expect(resolved?.source == binDir.path)
+    }
 }
