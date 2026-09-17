@@ -68,8 +68,17 @@ struct SkillTests {
         #expect(SkillInvocation.query(in: "/") == "")
         #expect(SkillInvocation.query(in: "/rev") == "rev")
         #expect(SkillInvocation.query(in: "/review now") == nil)
-        #expect(SkillInvocation.query(in: "hello /review") == nil)
+        #expect(SkillInvocation.query(in: "hello /review") == "review")
+        #expect(SkillInvocation.query(in: "hello /") == "")
+        #expect(SkillInvocation.query(in: "line one\n/sum") == "sum")
+        #expect(SkillInvocation.query(in: "2/3") == nil)
+        #expect(SkillInvocation.query(in: "see ~/Desktop/notes") == nil)
+        #expect(SkillInvocation.query(in: "match /G^3i/(x)") == nil)
         #expect(SkillInvocation.query(in: "") == nil)
+
+        #expect(SkillInvocation.removingQuery(from: "hello /rev") == "hello")
+        #expect(SkillInvocation.removingQuery(from: "/rev") == "")
+        #expect(SkillInvocation.removingQuery(from: "used /review already") == "used /review already")
 
         let skills = [
             SkillDefinition(name: "code-review", description: "Review a diff", body: "b", sourcePath: "/a", scope: .global),
