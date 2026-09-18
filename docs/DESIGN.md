@@ -37,6 +37,20 @@ System UI stack. Body 14, assistant 15.5 / 1.68, user bubble 15 / 1.45, header 1
 
 Semantic only: accent for send/primary, success for armed listen, warning for transcribing, danger for errors. User bubbles use a quiet fill, not a brand color.
 
+## Motion
+
+One vocabulary, `CueMotion`: `panel` for surfaces sliding in (sidebar, pickers, dialogs), `control` for hover and press, `arrive` for a turn landing in the transcript, `fade` for opacity. Everything honors Reduce Motion.
+
+- Buttons dip on press (`CuePressButtonStyle`) and lift a few percent under the pointer; hover-revealed rows rise in rather than pop.
+- The composer glass carries a pointer-following sheen. The sidebar does not.
+- The orb (`CueOrb`) is Cue's presence while it works: a sphere of drifting pastel light — a Metal aurora field under native specular, shadow, rim, and halo — as the busy indicator everywhere (thinking row, streaming tail, sidebar, pills). The app mark stays in the menu bar only.
+- The empty chat's hero is the word CUE written in ~1,900 star particles (`ParticleWordView`, SpriteKit sprites with hand-rolled physics): they fly in from a spiral, settle into the glyphs on springs, drift on small loops under a slow wave so the shape lives without breaking, and scatter from the pointer before springing home. Starlight (additive white / ice / peach) on dark glass, jewel tints on light. It is the title; nothing repeats it.
+- While a reply streams, the composer's edge glows with the same aurora light (`cueAuroraGlow`), a one-pass distance-field shader — never a blur.
+- Cost: every continuous effect reads `cueMotionActive` and stops when the panel is hidden or covered or Reduce Motion is on. Orbs, glow, and shimmer run at 30 fps; the particle field at 60 only while the pointer is in it. Shaders are compiled at launch off the main thread. Nothing in the chrome blurs per frame.
+- Buttons are flat fills. The send / stop disc answers the pointer with a tinted glow and a lift, never a gradient. Inline text actions use `CueInlineButtonStyle` (a quiet capsule).
+- Settings: the pane list's selection pill slides between rows; each pane rises in under a title and one-line subtitle; the card itself rises onto the scrim.
+- Metal is used only for light: `cueAurora`, `cueShimmer` (the "Thinking…" sweep), `cueSparkle` (the send disc as a draft becomes sendable). Particles are SpriteKit. No 3D, no third-party animation runtimes.
+
 ## Listen + remote
 
 Listen controls live in the composer tools row. Remote mode draws a virtual cursor overlay; it must not restyle the rest of the chrome.

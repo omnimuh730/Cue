@@ -54,3 +54,50 @@ struct HoverRegion: NSViewRepresentable {
         }
     }
 }
+
+/// `HoverRegion` with the pointer's position: the same geometric tracking area, reporting where
+/// the pointer is in the subtree's own top-left coordinates and `nil` once it leaves.
+struct PointerRegion: NSViewRepresentable {
+    var onChange: (CGPoint?) -> Void
+
+    func makeNSView(context: Context) -> TrackingView {
+        let view = TrackingView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: TrackingView, context: Context) {
+        view.onChange = onChange
+    }
+
+    final class TrackingView: NSView {
+        var onChange: ((CGPoint?) -> Void)?
+        private var area: NSTrackingArea?
+
+        override var isFlipped: Bool { true }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let area { removeTrackingArea(area) }
+            let next = NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(next)
+            area = next
+        }
+
+        override func mouseEntered(with event: NSEvent) { report(event) }
+        override func mouseMoved(with event: NSEvent) { report(event) }
+        override func mouseExited(with event: NSEvent) { onChange?(nil) }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        private func report(_ event: NSEvent) {
+            let point = convert(event.locationInWindow, from: nil)
+            onChange?(bounds.contains(point) ? point : nil)
+        }
+    }
+}

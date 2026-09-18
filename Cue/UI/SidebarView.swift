@@ -86,7 +86,8 @@ struct SidebarView: View {
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(CuePressButtonStyle())
+            .cueHoverLift()
             .help("New chat")
         }
         .padding(.horizontal, 4)
@@ -141,7 +142,7 @@ struct SidebarView: View {
                     }
                     Spacer(minLength: 0)
                     if streaming {
-                        CueMarkSpin(pointSize: 14, spinning: true, style: .busy)
+                        CueOrb(size: 14, energy: 1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -173,6 +174,7 @@ struct SidebarView: View {
         .background(
             RoundedRectangle(cornerRadius: CueTheme.radiusRow, style: .continuous)
                 .fill(rowFill(isActive: isActive, isHovered: isHovered))
+                .animation(CueMotion.fade, value: isHovered)
         )
         .onHover { hovering in
             let key = id ?? Self.allChatsHoverID
@@ -244,7 +246,7 @@ struct SidebarView: View {
                     }
                     Spacer(minLength: 0)
                     if streaming {
-                        CueMarkSpin(pointSize: 14, spinning: true, style: .busy)
+                        CueOrb(size: 14, energy: 1)
                     } else if unread {
                         Circle()
                             .fill(Color.accentColor)
@@ -291,11 +293,13 @@ struct SidebarView: View {
                 .accessibilityLabel("Delete chat")
             }
             .opacity(isHovered || isActive ? 0.9 : 0)
+            .animation(CueMotion.fade, value: isHovered || isActive)
             .padding(.trailing, 2)
         }
         .background(
             RoundedRectangle(cornerRadius: CueTheme.radiusRow, style: .continuous)
                 .fill(rowFill(isActive: isActive, isHovered: isHovered))
+                .animation(CueMotion.fade, value: isHovered)
         )
         .contextMenu { conversationMenu(conversation) }
         .animation(.easeInOut(duration: 0.18), value: streaming)
@@ -364,6 +368,7 @@ private struct SidebarRowButtonStyle: ButtonStyle {
             .background(
                 RoundedRectangle(cornerRadius: CueTheme.radiusRow, style: .continuous)
                     .fill(configuration.isPressed || hovering ? Color.primary.opacity(0.06) : .clear)
+                    .animation(CueMotion.fade, value: configuration.isPressed || hovering)
             )
             .onHover { hovering = $0 }
     }

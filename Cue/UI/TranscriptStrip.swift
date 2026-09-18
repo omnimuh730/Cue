@@ -80,8 +80,7 @@ struct TranscriptStrip: View {
             .help(expanded ? "Show only the latest lines" : "Show everything heard")
 
             if listening {
-                CueMarkSpin(pointSize: 11, spinning: true, style: .busy)
-                    .accessibilityLabel("Listening")
+                CueOrb(size: 11, energy: 0.7, label: "Listening")
             }
             Spacer(minLength: 8)
 

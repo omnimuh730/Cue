@@ -441,7 +441,12 @@ struct SelectableTextView: NSViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: SelectableNSTextView, context: Context) -> CGSize? {
         guard wraps else { return nsView.naturalSize() }
+        // A zero-width probe is SwiftUI asking for the minimum; the text has no opinion, so it
+        // answers with the last height instead of laying out a one-glyph column.
         let width = proposal.width ?? nsView.bounds.width
+        // A zero or infinite width is a probe, not a column; measuring at it would lay the text
+        // out as one glyph per line or one line per paragraph and report that height.
+        guard width > 1, width.isFinite else { return CGSize(width: width, height: nsView.lastMeasuredHeight) }
         return CGSize(width: width, height: nsView.height(forWidth: width))
     }
 }
@@ -451,6 +456,12 @@ final class SelectableNSTextView: NSTextView {
     var wrapsText = true
     private var lastWidth: CGFloat = -1
     private var lastHeight: CGFloat = 0
+    /// Heights already measured for this text, by width. A live resize asks for the same width
+    /// several times per layout pass and for the previous width again on the next; laying out a
+    /// long message once per distinct width instead of once per ask is what keeps the drag smooth.
+    private var heightsByWidth: [CGFloat: CGFloat] = [:]
+
+    var lastMeasuredHeight: CGFloat { lastHeight }
 
     /// A read-only, selectable text view with its own TextKit stack and no insets, so line
     /// fragments sit exactly where the view's coordinates say they do.
@@ -477,9 +488,15 @@ final class SelectableNSTextView: NSTextView {
         view.isAutomaticLinkDetectionEnabled = false
         view.linkTextAttributes = [.foregroundColor: NSColor.linkColor, .cursor: NSCursor.pointingHand]
         view.textContainerInset = .zero
-        view.isVerticallyResizable = true
+        // SwiftUI owns the frame. TextKit must never grow the view to fit a paragraph on its own:
+        // a self-sized view paints past the slot SwiftUI measured for it and over the next bubble.
+        view.isVerticallyResizable = false
         view.isHorizontallyResizable = !wraps
-        view.autoresizingMask = wraps ? [.width] : []
+        view.autoresizingMask = []
+        // Layer-backed views do not clip by default. Between the frame AppKit applies and the
+        // height SwiftUI measured there can be one resize tick of disagreement; clipping keeps
+        // that tick to a cropped last line rather than text drawn across its neighbours.
+        view.clipsToBounds = true
         view.wrapsText = wraps
         view.focusRingType = .none
         view.setAccessibilityRole(.staticText)
@@ -555,6 +572,7 @@ final class SelectableNSTextView: NSTextView {
         storage.beginEditing()
         storage.replaceCharacters(in: oldTail, with: replacement)
         storage.endEditing()
+        heightsByWidth.removeAll(keepingCapacity: true)
         // A selection that ends inside the rewritten tail is gone either way; one entirely
         // before it survives the edit untouched.
         if selection.length > 0, selection.location + selection.length <= stable {
@@ -580,23 +598,40 @@ final class SelectableNSTextView: NSTextView {
         return NSSize(width: lastWidth, height: lastHeight)
     }
 
+    /// Height of the text wrapped to `width`. Widths are matched on the pixel grid so the
+    /// fractional widths a layout pass hands out do not each count as new.
     func height(forWidth width: CGFloat) -> CGFloat {
-        guard width > 1, let layoutManager, let textContainer else { return lastHeight }
-        if abs(textContainer.containerSize.width - width) > 0.5 {
-            textContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        guard width > 1, width.isFinite, let layoutManager, let textContainer else { return lastHeight }
+        let key = (width * 2).rounded() / 2
+        if let cached = heightsByWidth[key] {
+            lastWidth = key
+            lastHeight = cached
+            return cached
+        }
+        if abs(textContainer.containerSize.width - key) > 0.5 {
+            textContainer.containerSize = NSSize(width: key, height: CGFloat.greatestFiniteMagnitude)
         }
         layoutManager.ensureLayout(for: textContainer)
-        lastWidth = width
+        lastWidth = key
         lastHeight = ceil(layoutManager.usedRect(for: textContainer).height)
+        heightsByWidth[key] = lastHeight
         return lastHeight
     }
 
+    /// The frame AppKit applies can trail the width SwiftUI last measured by a tick of a live
+    /// resize. Wrap to the frame that is actually on screen and ask SwiftUI to measure again so
+    /// the slot catches up on its next pass.
     override func layout() {
         super.layout()
-        guard wrapsText else { return }
-        if abs(bounds.width - lastWidth) > 0.5 {
+        guard wrapsText, let textContainer else { return }
+        let width = bounds.width
+        guard width > 1 else { return }
+        if abs(textContainer.containerSize.width - width) > 0.5 {
+            textContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        }
+        if abs(width - lastWidth) > 0.5 {
             let before = lastHeight
-            if abs(height(forWidth: bounds.width) - before) > 0.5 { invalidateIntrinsicContentSize() }
+            if abs(height(forWidth: width) - before) > 0.5 { invalidateIntrinsicContentSize() }
         }
     }
 
