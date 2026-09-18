@@ -42,6 +42,8 @@ final class AppSession {
     private let codex = CodexClient()
 
     var panel: CuePanelController?
+    /// Whether the panel is on screen. Continuous motion (orbs, glow, particles) pauses when not.
+    private(set) var windowVisible = true
     var conversations: [Conversation] = []
     var projects: [Project] = []
     var activeID: UUID?
@@ -190,6 +192,10 @@ final class AppSession {
 
     func attach(panel: CuePanelController) {
         self.panel = panel
+        panel.onVisibilityChange = { [weak self] visible in
+            guard let self, self.windowVisible != visible else { return }
+            self.windowVisible = visible
+        }
         applyWindowChrome()
         hotkeys.onAction = { [weak self] action in
             self?.handle(action)

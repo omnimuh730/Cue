@@ -38,8 +38,13 @@ enum CueTheme {
 
 struct CueGlassModifier: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var cornerRadius: CGFloat
     var interactive: Bool
+    /// A soft specular highlight that follows the pointer across the glass.
+    var sheen: Bool
+
+    @State private var pointer: CGPoint?
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -53,6 +58,11 @@ struct CueGlassModifier: ViewModifier {
                     interactive ? .regular.interactive() : .clear.interactive(),
                     in: .rect(cornerRadius: cornerRadius)
                 )
+                .overlay {
+                    if sheen {
+                        sheenLayer(in: shape)
+                    }
+                }
                 .overlay(
                     shape.strokeBorder(
                         LinearGradient(
@@ -65,22 +75,33 @@ struct CueGlassModifier: ViewModifier {
                 )
         }
     }
-}
 
-extension View {
-    func cueGlass(cornerRadius: CGFloat = CueTheme.radiusPanel, interactive: Bool = false) -> some View {
-        modifier(CueGlassModifier(cornerRadius: cornerRadius, interactive: interactive))
+    /// The highlight is a radial gradient clipped to the glass; it fades in where the pointer
+    /// arrives and out when it leaves, so an untouched panel stays plain glass.
+    private func sheenLayer(in shape: RoundedRectangle) -> some View {
+        GeometryReader { geo in
+            let point = pointer ?? CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+            RadialGradient(
+                colors: [.white.opacity(0.22), .white.opacity(0.05), .clear],
+                center: UnitPoint(x: point.x / max(geo.size.width, 1), y: point.y / max(geo.size.height, 1)),
+                startRadius: 0,
+                endRadius: max(geo.size.width, geo.size.height) * 0.55
+            )
+            .blendMode(.plusLighter)
+            .opacity(pointer == nil ? 0 : 1)
+            .animation(reduceMotion ? nil : CueMotion.fade, value: pointer == nil)
+        }
+        .clipShape(shape)
+        .allowsHitTesting(false)
+        // Geometric tracking, like `HoverRegion`: the pointer stays "inside" while it crosses
+        // the text views and buttons that live on the glass.
+        .background { PointerRegion { pointer = $0 } }
     }
 }
 
-struct CueMark: View {
-    var pointSize: CGFloat = 18
-
-    var body: some View {
-        Image(systemName: CueTheme.symbolName)
-            .font(.system(size: pointSize, weight: .medium))
-            .symbolRenderingMode(.monochrome)
-            .accessibilityHidden(true)
+extension View {
+    func cueGlass(cornerRadius: CGFloat = CueTheme.radiusPanel, interactive: Bool = false, sheen: Bool = false) -> some View {
+        modifier(CueGlassModifier(cornerRadius: cornerRadius, interactive: interactive, sheen: sheen))
     }
 }
 
@@ -98,6 +119,52 @@ struct CueWindowBackground: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+/// Small text actions inside a field — "Reload", "Replace", "Choose…". A quiet capsule that
+/// fills on hover and dips on press, so the affordance shows before the pointer finds it.
+struct CueInlineButtonStyle: ButtonStyle {
+    enum Role {
+        case normal
+        case destructive
+        case prominent
+    }
+
+    var role: Role = .normal
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(fill(pressed: configuration.isPressed), in: Capsule())
+            .contentShape(Capsule())
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.95 : 1)
+            .animation(CueMotion.control, value: configuration.isPressed)
+            .animation(CueMotion.fade, value: hovering)
+            .onHover { hovering = $0 }
+    }
+
+    private var foreground: Color {
+        switch role {
+        case .normal: .primary
+        case .destructive: .red
+        case .prominent: .white
+        }
+    }
+
+    private func fill(pressed: Bool) -> Color {
+        let lift = pressed ? 0.16 : (hovering ? 0.12 : 0.06)
+        switch role {
+        case .normal: return Color.primary.opacity(lift)
+        case .destructive: return Color.red.opacity(lift + 0.02)
+        case .prominent: return Color.accentColor.opacity(pressed ? 0.85 : 1)
+        }
     }
 }
 
