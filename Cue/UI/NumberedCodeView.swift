@@ -22,6 +22,9 @@ struct NumberedCodeView: NSViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NumberedCodeNSView, context: Context) -> CGSize? {
         let width = proposal.width ?? nsView.bounds.width
+        // Zero and infinite widths are probes; answer them with the last real measurement so the
+        // code is never laid out as a single endless line and sized to match.
+        guard width > 1, width.isFinite else { return CGSize(width: width, height: nsView.measuredHeight) }
         return CGSize(width: width, height: nsView.height(forWidth: width))
     }
 }
@@ -74,6 +77,8 @@ final class NumberedCodeNSView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: lastHeight)
     }
 
+    var measuredHeight: CGFloat { lastHeight }
+
     func apply(_ text: NSAttributedString) {
         let lineCount = CodeLineNumbers.lineStarts(in: text.string).count
         let changed = textView.apply(text, fadedTail: 0)
@@ -95,9 +100,17 @@ final class NumberedCodeNSView: NSView {
         super.layout()
         let gutterWidth = gutter.width
         let codeX = gutterWidth + CodeLineNumbers.codeInset
+        let column = max(1, bounds.width - codeX)
         gutter.frame = NSRect(x: 0, y: 0, width: gutterWidth, height: bounds.height)
-        textView.frame = NSRect(x: codeX, y: 0, width: max(1, bounds.width - codeX), height: bounds.height)
+        textView.frame = NSRect(x: codeX, y: 0, width: column, height: bounds.height)
         gutter.needsDisplay = true
+        // The text view's own re-measure invalidates only its size, which SwiftUI does not
+        // watch; this view is the representable, so the ask has to come from here.
+        let height = textView.height(forWidth: column)
+        if abs(height - lastHeight) > 0.5 {
+            lastHeight = height
+            invalidateIntrinsicContentSize()
+        }
     }
 }
 
