@@ -404,6 +404,8 @@ nonisolated enum IncrementalText {
 /// `Text` for chat messages so a drag can select across paragraphs and code, ⌘C and the context
 /// menu work, and a click inside Cue's non-activating panel takes key status for copying.
 struct SelectableTextView: NSViewRepresentable {
+    /// Where a selection inside this text goes; the chat floats its actions over the passage.
+    @Environment(\.selectMessageText) private var selectMessageText
     var text: NSAttributedString
     /// Characters to show, or `nil` for all of them. Drives the streaming reveal.
     var reveal: Int?
@@ -427,10 +429,12 @@ struct SelectableTextView: NSViewRepresentable {
         let value = shown
         view.textStorage?.setAttributedString(value)
         view.noteFadedTail(value.length < text.length ? StreamingTextReveal.fadeSpan : 0)
+        view.onSelect = selectMessageText
         return view
     }
 
     func updateNSView(_ view: SelectableNSTextView, context: Context) {
+        view.onSelect = selectMessageText
         let value = shown
         // A withheld tail means the ramp is in play; once nothing is withheld the text is solid.
         let faded = value.length < text.length ? StreamingTextReveal.fadeSpan : 0
@@ -604,6 +608,46 @@ final class SelectableNSTextView: NSTextView {
     override func mouseDown(with event: NSEvent) {
         if let window, !window.isKeyWindow { window.makeKey() }
         super.mouseDown(with: event)
+    }
+
+    /// Reports a finished selection: its text and its rectangle in panel content space (origin
+    /// top-left). Empty text means the selection is gone and the actions should close.
+    var onSelect: ((String, CGRect) -> Void)?
+
+    /// A drag or a click ends the selection gesture; anything mid-drag would flicker.
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        reportSelection()
+    }
+
+    private func reportSelection() {
+        guard let onSelect else { return }
+        let range = selectedRange()
+        guard range.length > 0,
+              let storage = textStorage,
+              NSMaxRange(range) <= storage.length,
+              let layoutManager,
+              let textContainer,
+              let content = window?.contentView
+        else {
+            onSelect("", .zero)
+            return
+        }
+        let text = (storage.string as NSString).substring(with: range)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            onSelect("", .zero)
+            return
+        }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+        rect.origin.x += textContainerOrigin.x
+        rect.origin.y += textContainerOrigin.y
+        let inContent = convert(rect, to: content)
+        // The SwiftUI root lays out top-left down; an unflipped host view needs its y mirrored.
+        let frame = content.isFlipped
+            ? inContent
+            : CGRect(x: inContent.minX, y: content.bounds.height - inContent.maxY, width: inContent.width, height: inContent.height)
+        onSelect(text, frame)
     }
 
     /// The Edit menu only sees key equivalents when Cue is the active app, which it usually is

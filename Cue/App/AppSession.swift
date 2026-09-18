@@ -64,6 +64,8 @@ final class AppSession {
     var mermaidAsCode = false
     /// Message the transcript should scroll to once it is on screen (from search).
     var scrollTarget: UUID?
+    /// Passage the reader has selected in a message, and where to float its actions.
+    var textSelection: MessageTextSelection?
     /// One transient notice at a time: errors, confirmations, "Undo".
     private(set) var notice: Notice?
     private var noticeDismissal: Task<Void, Never>?
@@ -89,6 +91,12 @@ final class AppSession {
     private(set) var importingKnowledge: [String] = []
 
     private var requests: [UUID: ChatRequest] = [:]
+    /// The same chats as `conversations`, oldest first: the order branches are laid out in.
+    /// Kept beside the sidebar order so the tab bar never sorts the list per row it draws.
+    private var conversationsByAge: [Conversation] = []
+    /// Branch each family was last read in, keyed by the family's `main` chat, so a sidebar row
+    /// reopens on the tab the user left it on.
+    private var activeBranches: [UUID: UUID] = [:]
     private var lastCaptionDraft = ""
     /// Composer state parked per conversation so switching chats mid-typing loses nothing.
     private var parkedDrafts: [UUID: (draft: String, attachments: [MessageAttachment])] = [:]
@@ -109,11 +117,20 @@ final class AppSession {
         return projects.first { $0.identifier == selectedProjectID }
     }
 
-    /// Conversations shown in the sidebar for the selected workspace.
+    /// Conversations of the selected workspace, branches included.
     var visibleConversations: [Conversation] {
         guard let selectedProjectID else { return conversations }
         return conversations.filter { $0.projectID == selectedProjectID }
     }
+
+    /// Branches of the chat on screen, `main` first: the chat's tabs. One entry means the thread
+    /// has never been forked, and the tab bar stays out of the way.
+    var branchTabs: [Conversation] {
+        guard let activeConversation else { return [] }
+        return branchFamily(of: activeConversation)
+    }
+
+    var showsBranchTabs: Bool { branchTabs.count > 1 }
 
     /// Full decoded turns; used for export and search, not for rendering (decoding attachments is slow).
     var activeTurns: [ChatTurn] {
@@ -222,6 +239,7 @@ final class AppSession {
         }
         if purged { save() }
         conversations = ConversationOrder.sorted(all.filter { $0.deletedAt == nil })
+        conversationsByAge = conversations.sorted { $0.createdAt < $1.createdAt }
         if activeID == nil {
             activeID = conversations.first?.identifier
         }
@@ -329,9 +347,10 @@ final class AppSession {
         conversation.messages.isEmpty && !streamingIDs.contains(conversation.identifier)
     }
 
-    /// An existing chat in this workspace that has nothing in it yet.
+    /// An existing chat in this workspace that has nothing in it yet. Only `main` branches
+    /// count: "New chat" should never land the reader on someone's empty fork.
     private func blankConversation(in projectID: UUID?) -> Conversation? {
-        conversations.first { $0.projectID == projectID && isBlank($0) }
+        conversations.first { $0.projectID == projectID && $0.forkedFromID == nil && isBlank($0) }
     }
 
     /// Switches the sidebar workspace and lands on that workspace's newest chat.
@@ -355,6 +374,10 @@ final class AppSession {
         }
         activeID = conversationID
         unreadIDs.remove(conversationID)
+        textSelection = nil
+        if let conversation = conversations.first(where: { $0.identifier == conversationID }) {
+            activeBranches[rootConversation(of: conversation).identifier] = conversationID
+        }
         let parked = parkedDrafts.removeValue(forKey: conversationID)
         draft = parked?.draft ?? ""
         attachments = parked?.attachments ?? []
@@ -388,19 +411,21 @@ final class AppSession {
         attachments.append(tool.attachment)
     }
 
-    /// Hides the chat at once and offers Undo; the row is purged after `undoWindow`.
+    /// Hides the thread — every branch of its family — at once and offers Undo; the rows are
+    /// purged after `undoWindow`. `deleteBranch` closes a single fork instead.
     func deleteConversation(_ conversation: Conversation) {
-        stop(conversationID: conversation.identifier)
-        let id = conversation.identifier
-        let title = conversation.title
-        conversation.deletedAt = .now
-        save()
-        if activeID == id {
-            activeID = nil
+        let root = rootConversation(of: conversation)
+        let family = branchFamily(of: conversation)
+        let ids = family.map(\.identifier)
+        let title = root.title
+        for branch in family {
+            stop(conversationID: branch.identifier)
+            branch.deletedAt = .now
+            forget(conversationID: branch.identifier)
         }
-        unreadIDs.remove(id)
-        parkedDrafts[id] = nil
-        if infoConversationID == id { infoConversationID = nil }
+        save()
+        if let activeID, ids.contains(activeID) { self.activeID = nil }
+        activeBranches[root.identifier] = nil
         reloadConversations()
         if activeID == nil {
             if let first = conversations.first {
@@ -409,18 +434,39 @@ final class AppSession {
                 newChat()
             }
         }
-        notify("Deleted “\(title.prefix(32))”", actionLabel: "Undo", autoDismiss: 6) { [weak self] in
-            self?.restoreConversation(id)
+        let forks = ids.count - 1
+        let label = forks > 0
+            ? "Deleted “\(title.prefix(32))” and \(forks) \(forks == 1 ? "branch" : "branches")"
+            : "Deleted “\(title.prefix(32))”"
+        notify(label, actionLabel: "Undo", autoDismiss: 6) { [weak self] in
+            self?.restoreConversations(ids)
         }
     }
 
     func restoreConversation(_ id: UUID) {
-        let descriptor = FetchDescriptor<Conversation>(predicate: #Predicate { $0.identifier == id })
-        guard let conversation = (try? container.mainContext.fetch(descriptor))?.first, conversation.deletedAt != nil else { return }
-        conversation.deletedAt = nil
+        restoreConversations([id])
+    }
+
+    /// Brings a deleted thread back with every branch it had.
+    func restoreConversations(_ ids: [UUID]) {
+        var restored: [UUID] = []
+        for id in ids {
+            guard let conversation = fetchConversation(id), conversation.deletedAt != nil else { continue }
+            conversation.deletedAt = nil
+            restored.append(id)
+        }
+        guard !restored.isEmpty else { return }
         save()
         reloadConversations()
-        select(id)
+        select(restored[0])
+    }
+
+    /// Drops the per-chat state a deleted conversation leaves behind.
+    private func forget(conversationID id: UUID) {
+        unreadIDs.remove(id)
+        parkedDrafts[id] = nil
+        if infoConversationID == id { infoConversationID = nil }
+        if textSelection?.conversationID == id { textSelection = nil }
     }
 
     func renameConversation(_ conversation: Conversation, to name: String) {
@@ -441,6 +487,241 @@ final class AppSession {
     /// Chats to show in the given sidebar bucket for the selected workspace.
     func visibleConversations(pinned: Bool) -> [Conversation] {
         visibleConversations.filter { ($0.pinnedAt != nil) == pinned }
+    }
+
+    // MARK: - Branches
+
+    /// The `main` chat of `conversation`'s family: what the sidebar lists and what pinning,
+    /// renaming, and deleting a thread act on.
+    func rootConversation(of conversation: Conversation) -> Conversation {
+        let all = conversations
+        let rootID = ChatBranching.rootID(of: conversation.identifier) { id in
+            all.first { $0.identifier == id }?.forkedFromID
+        }
+        return all.first { $0.identifier == rootID } ?? conversation
+    }
+
+    /// Every branch of `conversation`'s family, `main` first then the forks in the order they
+    /// were made — the order of the tab bar.
+    func branchFamily(of conversation: Conversation) -> [Conversation] {
+        ChatBranching.family(
+            of: conversation.identifier,
+            in: conversationsByAge,
+            key: \.identifier,
+            parent: \.forkedFromID
+        )
+    }
+
+    /// Tab label: what the branch was renamed to, or its default name for where it sits.
+    func branchName(_ conversation: Conversation) -> String {
+        if let name = conversation.branchName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        let family = branchFamily(of: conversation)
+        return ChatBranching.defaultName(index: family.firstIndex { $0.identifier == conversation.identifier } ?? 0)
+    }
+
+    /// Where a fork was cut, for the tab's tooltip. Nil for `main`, which was not forked.
+    func branchOrigin(of conversation: Conversation) -> String? {
+        guard let parentID = conversation.forkedFromID,
+              let parent = conversations.first(where: { $0.identifier == parentID })
+        else { return nil }
+        let turns = conversation.messages.count
+        let when = conversation.createdAt.formatted(date: .abbreviated, time: .shortened)
+        return "Forked from \(branchName(parent)) after \(turns) \(turns == 1 ? "turn" : "turns") · \(when)"
+    }
+
+    /// Sidebar rows: one per family, represented by its `main` chat. Forks appear as tabs in the
+    /// chat rather than rows of their own, so branching a thread never splits it in the list.
+    func sidebarConversations(pinned: Bool) -> [Conversation] {
+        var seen: Set<UUID> = []
+        var rows: [Conversation] = []
+        // `visibleConversations` is already in sidebar order, so a family takes the place of its
+        // most recently active branch.
+        for conversation in visibleConversations {
+            let root = rootConversation(of: conversation)
+            guard seen.insert(root.identifier).inserted else { continue }
+            guard (root.pinnedAt != nil) == pinned else { continue }
+            rows.append(root)
+        }
+        return rows
+    }
+
+    /// Branches in a family, for the row's branch count.
+    func branchCount(of conversation: Conversation) -> Int {
+        branchFamily(of: conversation).count
+    }
+
+    /// Opens a sidebar row on the branch the reader left it on, or its most recent one.
+    func selectFamily(_ rootID: UUID) {
+        guard let root = conversations.first(where: { $0.identifier == rootID }) else { return }
+        let family = branchFamily(of: root)
+        if let remembered = activeBranches[rootID], family.contains(where: { $0.identifier == remembered }) {
+            select(remembered)
+            return
+        }
+        select((family.max { $0.updatedAt < $1.updatedAt } ?? root).identifier)
+    }
+
+    /// Forks the thread at `messageID`: `git checkout -b` for a chat. The turns up to and
+    /// including that message are copied into a new branch, the chat they came from is left
+    /// untouched, and the branch opens as a tab beside it. `quoting` seeds its composer with the
+    /// passage the fork was started from.
+    @discardableResult
+    func fork(from messageID: UUID, quoting passage: String? = nil) -> Conversation? {
+        guard let source = conversations.first(where: { $0.messages.contains { $0.identifier == messageID } })
+        else { return nil }
+        let ordered = orderedMessages(in: source)
+        let kept = TurnTruncation.keep(ordered, at: messageID, inclusive: true, key: \.identifier)
+
+        let branch = Conversation(title: source.title, projectID: source.projectID)
+        branch.forkedFromID = source.identifier
+        branch.forkedAtMessageID = messageID
+        branch.titleIsCustom = source.titleIsCustom
+        // The Codex thread belongs to the chat it was started in; this branch replays its own
+        // turns through `CodexPrompt` instead, exactly as a truncated thread does.
+        branch.codexThreadID = nil
+        container.mainContext.insert(branch)
+
+        for message in kept {
+            var turn = message.asTurn()
+            turn.id = UUID()
+            // A turn copied mid-stream is finished text as far as the branch is concerned.
+            if turn.status == .streaming { turn.status = .complete }
+            let copy = Message(
+                identifier: turn.id,
+                role: turn.role,
+                content: turn.content,
+                createdAt: turn.createdAt,
+                status: turn.status
+            )
+            copy.apply(turn)
+            copy.conversation = branch
+            branch.messages.append(copy)
+        }
+        branch.updatedAt = .now
+        save()
+        reloadConversations()
+        select(branch.identifier)
+        if let passage, !passage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            draft = ChatBranching.appendingQuote(passage, to: "")
+        }
+        notify("Forked \(branchName(branch)) from \(branchName(source))", autoDismiss: 3)
+        return branch
+    }
+
+    /// Forks the chat on screen at its newest turn, so the next question starts a branch instead
+    /// of continuing this one.
+    func forkActiveConversation() {
+        guard let conversation = activeConversation else { return }
+        guard let last = orderedMessages(in: conversation).last else {
+            notify("This chat has no turns to fork yet.", autoDismiss: 3)
+            return
+        }
+        fork(from: last.identifier)
+    }
+
+    func renameBranch(_ conversation: Conversation, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        conversation.branchName = trimmed.isEmpty ? nil : String(trimmed.prefix(32))
+        save()
+    }
+
+    /// What deleting one branch changed, so Undo can put the tree back as it was.
+    private struct BranchDeletion {
+        struct Child {
+            var id: UUID
+            var forkedAtMessageID: UUID?
+        }
+
+        var branchID: UUID
+        var children: [Child]
+    }
+
+    /// Closes one fork. Branches that grew out of it take its place in the tree — git deletes a
+    /// branch without deleting what was forked from it — and the chat lands on its parent.
+    /// Deleting `main` deletes the whole thread instead.
+    func deleteBranch(_ conversation: Conversation) {
+        guard let parentID = conversation.forkedFromID,
+              let parent = conversations.first(where: { $0.identifier == parentID })
+        else {
+            deleteConversation(conversation)
+            return
+        }
+        stop(conversationID: conversation.identifier)
+        let children = ChatBranching.children(of: conversation.identifier, in: conversations, parent: \.forkedFromID)
+        let deletion = BranchDeletion(
+            branchID: conversation.identifier,
+            children: children.map { BranchDeletion.Child(id: $0.identifier, forkedAtMessageID: $0.forkedAtMessageID) }
+        )
+        for child in children {
+            child.forkedFromID = conversation.forkedFromID
+            child.forkedAtMessageID = conversation.forkedAtMessageID
+        }
+        let name = branchName(conversation)
+        let id = conversation.identifier
+        conversation.deletedAt = .now
+        save()
+        forget(conversationID: id)
+        reloadConversations()
+        select(parent.identifier)
+        notify("Deleted branch “\(name)”", actionLabel: "Undo", autoDismiss: 6) { [weak self] in
+            self?.restore(deletion)
+        }
+    }
+
+    private func restore(_ deletion: BranchDeletion) {
+        guard let branch = fetchConversation(deletion.branchID), branch.deletedAt != nil else { return }
+        branch.deletedAt = nil
+        for child in deletion.children {
+            guard let conversation = fetchConversation(child.id) else { continue }
+            conversation.forkedFromID = deletion.branchID
+            conversation.forkedAtMessageID = child.forkedAtMessageID
+        }
+        save()
+        reloadConversations()
+        select(deletion.branchID)
+    }
+
+    private func fetchConversation(_ id: UUID) -> Conversation? {
+        let descriptor = FetchDescriptor<Conversation>(predicate: #Predicate { $0.identifier == id })
+        return (try? container.mainContext.fetch(descriptor))?.first
+    }
+
+    // MARK: - Selected text
+
+    /// Records a passage the reader selected in a message. `frame` is panel content space
+    /// (origin top-left), like the remote cursor, so `RootView` can float the actions over it.
+    func selectText(_ text: String, messageID: UUID, at frame: CGRect) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let activeID else {
+            textSelection = nil
+            return
+        }
+        textSelection = MessageTextSelection(
+            conversationID: activeID,
+            messageID: messageID,
+            text: text,
+            frame: frame
+        )
+    }
+
+    func clearTextSelection() {
+        textSelection = nil
+    }
+
+    /// Quotes the selection into the composer, leaving the thread as it is.
+    func addSelectionToDraft() {
+        guard let selection = textSelection else { return }
+        draft = ChatBranching.appendingQuote(selection.text, to: draft)
+        clearTextSelection()
+    }
+
+    /// Branches the thread at the message the selection sits in, carrying the passage into the
+    /// new branch's composer.
+    func forkFromSelection() {
+        guard let selection = textSelection else { return }
+        clearTextSelection()
+        fork(from: selection.messageID, quoting: selection.text)
     }
 
     // MARK: - Projects
@@ -883,6 +1164,7 @@ final class AppSession {
     /// Closes the topmost overlay, or stops the on-screen reply when nothing is open. Returns
     /// whether the key was used.
     func dismissTopmost() -> Bool {
+        if textSelection != nil { textSelection = nil; return true }
         if previewAttachment != nil { previewAttachment = nil; return true }
         if previewDiagram != nil { previewDiagram = nil; return true }
         if infoConversationID != nil { infoConversationID = nil; return true }
@@ -899,13 +1181,24 @@ final class AppSession {
         return false
     }
 
-    /// ⌘] / ⌘[: the next or previous chat in the sidebar's order, wrapping.
+    /// ⌘] / ⌘[: the next or previous thread in the sidebar's order, wrapping. Branches move
+    /// with their thread; the tab bar steps between them.
     func selectAdjacentConversation(_ delta: Int) {
-        let visible = visibleConversations(pinned: true) + visibleConversations(pinned: false)
-        guard !visible.isEmpty else { return }
-        let current = visible.firstIndex { $0.identifier == activeID } ?? 0
-        let next = (current + delta + visible.count) % visible.count
-        select(visible[next].identifier)
+        let rows = sidebarConversations(pinned: true) + sidebarConversations(pinned: false)
+        guard !rows.isEmpty else { return }
+        let currentRoot = activeConversation.map { rootConversation(of: $0).identifier }
+        let current = rows.firstIndex { $0.identifier == currentRoot } ?? 0
+        let next = (current + delta + rows.count) % rows.count
+        selectFamily(rows[next].identifier)
+    }
+
+    /// ⌥⌘] / ⌥⌘[: the next or previous branch of the thread on screen, wrapping.
+    func selectAdjacentBranch(_ delta: Int) {
+        let tabs = branchTabs
+        guard tabs.count > 1 else { return }
+        let current = tabs.firstIndex { $0.identifier == activeID } ?? 0
+        let next = (current + delta + tabs.count) % tabs.count
+        select(tabs[next].identifier)
     }
 
     // MARK: - Hotkeys

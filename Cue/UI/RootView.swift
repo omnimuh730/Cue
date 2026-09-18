@@ -18,9 +18,15 @@ struct RootView: View {
                     VStack(spacing: 0) {
                         ChatView(session: session)
                             // Reserve the toolbar band; the bar itself is drawn window-wide below
-                            // so scrolled content passes beneath the glass.
+                            // so scrolled content passes beneath the glass. Branch tabs sit in
+                            // the same inset, under the toolbar and above the transcript.
                             .safeAreaInset(edge: .top, spacing: 0) {
-                                Color.clear.frame(height: CueTheme.headerHeight)
+                                VStack(spacing: 0) {
+                                    Color.clear.frame(height: CueTheme.headerHeight)
+                                    if session.showsBranchTabs {
+                                        BranchTabBar(session: session)
+                                    }
+                                }
                             }
                             .environment(\.expandDiagram) { session.previewDiagram = $0 }
                         ComposerView(session: session)
@@ -62,6 +68,13 @@ struct RootView: View {
                 AttachmentPreviewOverlay(attachment: preview) {
                     session.previewAttachment = nil
                 }
+            }
+            if let selection = session.textSelection {
+                SelectionActionsOverlay(
+                    selection: selection,
+                    onAddToChat: { session.addSelectionToDraft() },
+                    onFork: { session.forkFromSelection() }
+                )
             }
             if let diagram = session.previewDiagram {
                 MermaidPreviewOverlay(source: diagram) {
@@ -138,10 +151,19 @@ struct RootView: View {
                     session.settingsOpen = true
                     return nil
                 case "]":
-                    session.selectAdjacentConversation(1)
+                    // ⌥⌘] steps through the branches of this chat; ⌘] through the sidebar.
+                    if event.modifierFlags.contains(.option) {
+                        session.selectAdjacentBranch(1)
+                    } else {
+                        session.selectAdjacentConversation(1)
+                    }
                     return nil
                 case "[":
-                    session.selectAdjacentConversation(-1)
+                    if event.modifierFlags.contains(.option) {
+                        session.selectAdjacentBranch(-1)
+                    } else {
+                        session.selectAdjacentConversation(-1)
+                    }
                     return nil
                 default:
                     return event

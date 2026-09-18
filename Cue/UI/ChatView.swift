@@ -82,9 +82,15 @@ struct ChatView: View {
                             onPreview: { session.previewAttachment = $0 },
                             onRegenerate: { session.regenerate(messageID: message.identifier, model: $0) },
                             onEdit: { session.resend(userMessageID: message.identifier, text: $0) },
-                            onDeleteFrom: { session.deleteFromMessage(message.identifier) }
+                            onDeleteFrom: { session.deleteFromMessage(message.identifier) },
+                            onFork: { _ = session.fork(from: message.identifier) }
                         )
                         .id(message.identifier)
+                        // Every selectable run in this bubble reports its selection as coming
+                        // from this message, so "Fork" knows where to cut the thread.
+                        .environment(\.selectMessageText) { text, frame in
+                            session.selectText(text, messageID: message.identifier, at: frame)
+                        }
                     }
                     if hidden > 0, readingOrder == .newestAtTop {
                         earlierMessagesButton(hidden)
@@ -114,6 +120,8 @@ struct ChatView: View {
             // Geometry cannot separate a slow drag from streaming growth. While the reader is on
             // the scroll view, follow stands down; letting go at the bottom resumes it.
             .onScrollPhaseChange { _, phase in
+                // The selection actions are pinned to where the passage was; scrolling moves it.
+                if phase != .idle { session.clearTextSelection() }
                 // `.animating` is Cue's own scrollTo, not the reader.
                 let driving = phase == .tracking || phase == .interacting || phase == .decelerating
                 if followBox.follow.setInteracting(driving), readingOrder == .newestAtBottom {
@@ -206,6 +214,8 @@ struct MessageBubble: View {
     var onRegenerate: (ModelID?) -> Void = { _ in }
     var onEdit: (String) -> Void = { _ in }
     var onDeleteFrom: () -> Void = {}
+    /// Branches the thread at this message, leaving this chat as it is.
+    var onFork: () -> Void = {}
 
     @State private var hovering = false
     @State private var copied = false
@@ -335,6 +345,9 @@ struct MessageBubble: View {
                     editText = message.content
                     editing = true
                 }
+            }
+            actionButton("Fork", symbol: "arrow.triangle.branch", help: "Branch the chat here: this thread is kept and the copy opens as a tab") {
+                onFork()
             }
             actionButton("Delete", symbol: "trash", help: role == .user ? "Delete this message and everything after it" : "Delete this reply and everything after it") {
                 onDeleteFrom()

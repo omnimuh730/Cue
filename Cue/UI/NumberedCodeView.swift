@@ -8,15 +8,19 @@ import SwiftUI
 /// from. Numbers are drawn beside the text view rather than as part of it, so a drag-select or
 /// ⌘A copies only the code.
 struct NumberedCodeView: NSViewRepresentable {
+    /// Selecting a snippet offers the same actions as selecting prose.
+    @Environment(\.selectMessageText) private var selectMessageText
     var text: NSAttributedString
 
     func makeNSView(context: Context) -> NumberedCodeNSView {
         let view = NumberedCodeNSView()
+        view.onSelect = selectMessageText
         view.apply(text)
         return view
     }
 
     func updateNSView(_ view: NumberedCodeNSView, context: Context) {
+        view.onSelect = selectMessageText
         view.apply(text)
     }
 
@@ -72,6 +76,12 @@ final class NumberedCodeNSView: NSView {
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: lastHeight)
+    }
+
+    /// Passed through to the code's text view, which reports selections like any other message text.
+    var onSelect: ((String, CGRect) -> Void)? {
+        get { textView.onSelect }
+        set { textView.onSelect = newValue }
     }
 
     func apply(_ text: NSAttributedString) {

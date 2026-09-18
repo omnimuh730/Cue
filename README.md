@@ -16,6 +16,14 @@ Do not run the nested `Halo/` or `AirScript/` trees as part of this target. They
 
 Hover a message for **Copy**, **Regenerate** (the menu picks another model), **Edit** (sends again; later turns are removed), and **Delete from here**. A reply that failed — no network, a stopped stream — shows **Retry** next to the error. Right-click a chat in the sidebar to rename, pin, export as Markdown, or delete it; **Undo** is offered for a few seconds after a delete. **⌘K** searches titles and messages, **⌘[** / **⌘]** switch chats, and **Esc** closes whatever is open or stops the reply on screen.
 
+## Branches
+
+Cue treats a chat like a git branch. **Fork** on any message — the hover row under a bubble, the tab bar's **+**, or a chat's context menu — copies the thread up to that turn into a new branch and leaves the original exactly as it was, so both versions live on. The first fork makes a tab bar appear under the toolbar: `main` and the forks beside it. Click a tab to switch, double-click to rename it, **⌥⌘[** / **⌥⌘]** step through them, and the **×** on a fork deletes it (anything forked out of it reattaches to its parent, and **Undo** puts it back).
+
+The sidebar still shows one row per chat however many branches it has; the row carries a branch count and reopens on the branch you last read. Deleting the row deletes the thread with all of its branches.
+
+Select any text in a message and two actions float over it: **Add to chat** quotes the passage into the composer, and **Fork** branches the chat at that message and carries the quote into the new branch's composer — the way to ask a follow-up about one part of an answer without derailing the thread it came from.
+
 ## Files
 
 Attach PDF, Word, Excel, PowerPoint, images, Markdown, and other text files with the paperclip, by dropping them on the composer, or by pasting a file with ⌘V. PDFs go to OpenAI as-is; Office files are read on your Mac with Apple frameworks (no plugins) and sent as text. Click a chip to preview it.

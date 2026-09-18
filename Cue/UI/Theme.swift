@@ -14,6 +14,8 @@ enum CueTheme {
     /// Kept clear to the right of a floating sidebar so the chat behind it stays visible.
     static let sidebarOverlayGutter: CGFloat = 52
     static let readingColumnMax: CGFloat = 800
+    /// Branch tabs, shown under the toolbar once a chat has been forked.
+    static let branchTabBarHeight: CGFloat = 32
     static let radiusRow: CGFloat = 8
     static let radiusPanel: CGFloat = 16
     static let radiusComposer: CGFloat = 28

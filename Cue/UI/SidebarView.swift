@@ -30,7 +30,7 @@ struct SidebarView: View {
                                 workspaceRow(project)
                             }
                         }
-                        let pinned = session.visibleConversations(pinned: true)
+                        let pinned = session.sidebarConversations(pinned: true)
                         if !pinned.isEmpty {
                             sectionTitle("Pinned")
                             ForEach(pinned, id: \.identifier) { conversation in
@@ -38,7 +38,7 @@ struct SidebarView: View {
                             }
                         }
                         sectionTitle(session.selectedProject.map { "Chats in \($0.name)" } ?? "Recents")
-                        ForEach(session.visibleConversations(pinned: false), id: \.identifier) { conversation in
+                        ForEach(session.sidebarConversations(pinned: false), id: \.identifier) { conversation in
                             conversationRow(conversation)
                         }
                         if session.visibleConversations.isEmpty {
@@ -198,17 +198,20 @@ struct SidebarView: View {
         .buttonStyle(SidebarRowButtonStyle())
     }
 
+    /// One thread. A forked thread is still one row: its branches are the chat's tabs, and the
+    /// row reflects whichever of them is live.
     private func conversationRow(_ conversation: Conversation) -> some View {
-        let isActive = session.activeID == conversation.identifier
+        let family = session.branchFamily(of: conversation)
+        let isActive = family.contains { $0.identifier == session.activeID }
         let isHovered = hoveredID == conversation.identifier
-        let streaming = session.isStreaming(conversation)
-        let unread = session.isUnread(conversation)
-        let status = streaming ? (session.activity(for: conversation) ?? "Responding…") : nil
+        let streaming = family.contains { session.isStreaming($0) }
+        let unread = family.contains { session.isUnread($0) }
+        let status = streaming ? (family.compactMap { session.activity(for: $0) }.first ?? "Responding…") : nil
         let project = session.project(for: conversation)
 
         return HStack(spacing: 0) {
             Button {
-                session.select(conversation.identifier)
+                session.selectFamily(conversation.identifier)
                 session.dismissSidebarIfOverlaid()
             } label: {
                 HStack(spacing: 8) {
@@ -224,9 +227,21 @@ struct SidebarView: View {
                                     if !focused, renamingID == conversation.identifier { commitRename(conversation) }
                                 }
                         } else {
-                            Text(conversation.title)
-                                .font(.system(size: 13, weight: isActive || unread ? .medium : .regular))
-                                .lineLimit(1)
+                            HStack(spacing: 5) {
+                                Text(conversation.title)
+                                    .font(.system(size: 13, weight: isActive || unread ? .medium : .regular))
+                                    .lineLimit(1)
+                                if family.count > 1 {
+                                    Label("\(family.count)", systemImage: "arrow.triangle.branch")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                        .labelStyle(.titleAndIcon)
+                                        .padding(.horizontal, 5)
+                                        .frame(height: 15)
+                                        .background(Color.primary.opacity(0.08), in: Capsule())
+                                        .help("\(family.count) branches")
+                                }
+                            }
                         }
                         if let status {
                             Text(status)
@@ -287,7 +302,7 @@ struct SidebarView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(streaming ? "Stop and delete" : "Delete chat")
+                .help(streaming ? "Stop and delete" : (session.branchCount(of: conversation) > 1 ? "Delete this chat and its branches" : "Delete chat"))
                 .accessibilityLabel("Delete chat")
             }
             .opacity(isHovered || isActive ? 0.9 : 0)
@@ -308,6 +323,10 @@ struct SidebarView: View {
     private func conversationMenu(_ conversation: Conversation) -> some View {
         Button("Rename…") { beginRename(conversation) }
         Button(conversation.pinnedAt == nil ? "Pin" : "Unpin") { session.togglePin(conversation) }
+        Button("Fork chat") {
+            session.selectFamily(conversation.identifier)
+            session.forkActiveConversation()
+        }
         Button("Thread info") { session.infoConversationID = conversation.identifier }
         Divider()
         Button("Copy as Markdown") {
@@ -317,7 +336,9 @@ struct SidebarView: View {
         }
         Button("Save as Markdown…") { ConversationExport.save(conversation) }
         Divider()
-        Button("Delete", role: .destructive) { session.deleteConversation(conversation) }
+        Button(session.branchCount(of: conversation) > 1 ? "Delete chat and branches" : "Delete", role: .destructive) {
+            session.deleteConversation(conversation)
+        }
     }
 
     private func beginRename(_ conversation: Conversation) {
