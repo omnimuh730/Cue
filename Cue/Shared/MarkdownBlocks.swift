@@ -158,6 +158,20 @@ nonisolated enum MarkdownBlocks {
         return alignments
     }
 
+    /// The info string of a fence opener (`"swift"` for ```` ```swift ````), or nil when the line
+    /// is prose that merely starts with backticks.
+    ///
+    /// CommonMark forbids a backtick inside a backtick fence's info string, and that rule is what
+    /// separates ```` ```swift ```` from a sentence like ```` ```text``` means plain output ````.
+    /// Without it that sentence opens a fence that never closes, and the whole rest of the answer
+    /// is swallowed into a code block.
+    static func fenceInfo(_ trimmed: String) -> String? {
+        guard trimmed.hasPrefix("```") else { return nil }
+        let info = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
+        guard !info.contains("`") else { return nil }
+        return info.lowercased()
+    }
+
     static func heading(from line: String) -> (level: Int, text: String)? {
         var level = 0
         var index = line.startIndex
@@ -211,9 +225,8 @@ nonisolated enum MarkdownBlocks {
                 paragraph.append(pending.line)
             }
 
-            if trimmed.hasPrefix("```") {
+            if let language = MarkdownBlocks.fenceInfo(trimmed) {
                 flushAll()
-                let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces).lowercased()
                 fence = (language, [])
                 return
             }

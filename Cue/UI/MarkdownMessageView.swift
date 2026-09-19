@@ -167,6 +167,20 @@ struct MarkdownDocument {
     }
 }
 
+/// Which parse a bubble draws when its own has fallen behind the text it was handed.
+///
+/// While a turn streams, the previous pass stands in for the frame or two the background reparse
+/// takes: the next flush arrives 40 ms later and corrects it, and the reveal head trails further
+/// behind than that in any case. A finished message has no next flush, so the previous pass would
+/// be the last thing the reader ever sees — an answer that stops mid-sentence, or a code block
+/// frozen on the characters that had arrived when that pass ran. There the text is parsed inline
+/// instead, the same way every message is parsed when a chat is opened.
+nonisolated enum MarkdownDocumentChoice {
+    static func keepsPreviousPass(hasPreviousPass: Bool, streaming: Bool) -> Bool {
+        hasPreviousPass && streaming
+    }
+}
+
 /// Keeps parsed messages around after their views are recycled.
 ///
 /// A `LazyVStack` tears down and rebuilds bubbles as the transcript scrolls; without this, every
@@ -243,6 +257,14 @@ struct MarkdownMessageView: View {
     /// While the turn is still streaming, Mermaid fences stay as source (the fence may be incomplete).
     var streaming: Bool = false
 
+    /// Everything the parsed document depends on. Keyed on the text alone, the parse never reran
+    /// when the diagram mode was toggled or the turn ended, leaving the bubble on an earlier pass.
+    private struct ParseKey: Equatable {
+        var text: String
+        var mermaidAsCode: Bool
+        var streaming: Bool
+    }
+
     @State private var document = MarkdownDocument()
     /// Characters revealed so far; `.infinity` means "all of it", the state for finished messages.
     @State private var revealed: Double
@@ -287,7 +309,7 @@ struct MarkdownMessageView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: text) { await reparse() }
+        .task(id: ParseKey(text: text, mermaidAsCode: mermaidAsCode, streaming: streaming)) { await reparse() }
         .task(id: [revealing, streaming]) { await runReveal() }
         .onChange(of: streaming) { _, isStreaming in
             if isStreaming { revealing = true }
@@ -297,15 +319,17 @@ struct MarkdownMessageView: View {
 
     /// The parsed text to draw right now.
     ///
-    /// Parsing the current text inline happens only when there is nothing at all to show, so a
-    /// bubble never flashes empty. Once anything is parsed, a flush that has not been reparsed
-    /// yet keeps drawing the previous pass: the background reparse lands within a frame or two,
-    /// and the reveal head trails further behind than that in any case.
+    /// Parsing the current text inline happens when there is nothing to show yet, and whenever a
+    /// finished message's parse has fallen behind — a turn that has ended has no further flush to
+    /// correct the view, so drawing the previous pass there would strand the end of the answer
+    /// (`MarkdownDocumentChoice`).
     private var visibleDocument: MarkdownDocument {
         if document.matches(text: text, mermaidAsCode: mermaidAsCode) { return document }
         let store = MarkdownDocumentStore.shared
         if let cached = store.document(for: messageID, text: text, mermaidAsCode: mermaidAsCode) { return cached }
-        if !document.pieces.isEmpty { return document }
+        if MarkdownDocumentChoice.keepsPreviousPass(hasPreviousPass: !document.pieces.isEmpty, streaming: streaming) {
+            return document
+        }
         let made = MarkdownDocument.make(
             text: text,
             mermaidAsCode: mermaidAsCode,
@@ -349,9 +373,13 @@ struct MarkdownMessageView: View {
             try? await Task.sleep(for: RevealPacing.frameInterval)
             if Task.isCancelled { return }
             let target = Double(document.length)
-            let next = RevealPacing.advance(min(revealed, target), toward: target)
-            revealed = next
-            MarkdownDocumentStore.shared.store(reveal: next, for: messageID)
+            // Never rewind. A reparse that has not landed yet leaves `document` shorter than what
+            // is already on screen, and pulling the head back to it would blank text mid-read.
+            let next = revealed >= target ? revealed : RevealPacing.advance(revealed, toward: target)
+            if next != revealed {
+                revealed = next
+                MarkdownDocumentStore.shared.store(reveal: next, for: messageID)
+            }
             if !streaming, next >= target {
                 revealed = .infinity
                 MarkdownDocumentStore.shared.store(reveal: .infinity, for: messageID)
@@ -362,7 +390,9 @@ struct MarkdownMessageView: View {
     }
 }
 
-private extension MarkdownDocument {
+extension MarkdownDocument {
+    /// Whether this parse is the one for `text` in the current diagram mode. An empty parse never
+    /// matches, so a bubble that has nothing laid out yet parses rather than drawing nothing.
     func matches(text other: String, mermaidAsCode flag: Bool) -> Bool {
         !pieces.isEmpty && text == other && mermaidAsCode == flag
     }

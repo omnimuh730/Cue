@@ -139,3 +139,51 @@ struct ReadingOrderTests {
         #expect(try JSONDecoder().decode(PublicSettings.self, from: data).readingOrder == .newestAtTop)
     }
 }
+
+/// What a bubble draws when its parse has fallen behind the text it was handed.
+struct MarkdownDocumentTests {
+    private func parse(_ text: String, mermaidAsCode: Bool = false) -> MarkdownDocument {
+        MarkdownDocument.make(
+            text: text,
+            mermaidAsCode: mermaidAsCode,
+            blocks: MarkdownRenderer.render(text, reusing: [])
+        )
+    }
+
+    @Test func aParseMatchesOnlyItsOwnTextAndDiagramMode() {
+        let parsed = parse("# Title\n\nbody")
+        #expect(parsed.matches(text: "# Title\n\nbody", mermaidAsCode: false))
+        #expect(!parsed.matches(text: "# Title\n\nbody, and more", mermaidAsCode: false))
+        // Toggling diagram mode invalidates the parse; drawing it anyway froze the bubble.
+        #expect(!parsed.matches(text: "# Title\n\nbody", mermaidAsCode: true))
+        // Nothing laid out yet never stands in for text that has something in it.
+        #expect(!MarkdownDocument().matches(text: "", mermaidAsCode: false))
+    }
+
+    @Test func aFinishedMessageIsNeverLeftOnAnEarlierPass() {
+        // Mid-stream the next flush lands 40 ms later, so the previous pass may stand in.
+        #expect(MarkdownDocumentChoice.keepsPreviousPass(hasPreviousPass: true, streaming: true))
+        // A turn that has ended has no next flush: the previous pass would be the last thing the
+        // reader sees, so the bubble parses rather than stranding the end of the answer.
+        #expect(!MarkdownDocumentChoice.keepsPreviousPass(hasPreviousPass: true, streaming: false))
+        #expect(!MarkdownDocumentChoice.keepsPreviousPass(hasPreviousPass: false, streaming: true))
+    }
+
+    @Test func offsetsRunEndToEndSoTheRevealCrossesACodeBlock() {
+        let parsed = parse("Intro:\n\n```text\n0, 1, 1, 2\n```\n\nEach is the sum of two.")
+        #expect(parsed.pieces.count == 3)
+        #expect(parsed.length == parsed.pieces.reduce(0) { $0 + $1.length })
+        var running = 0
+        for piece in parsed.pieces {
+            #expect(piece.offset == running)
+            running += piece.length
+        }
+        // The fence keeps every character it was given, and the prose after it is a piece of its own.
+        guard case .code(_, let source, _) = parsed.pieces[1].body else {
+            Issue.record("the fenced block should be a code piece")
+            return
+        }
+        #expect(source == "0, 1, 1, 2")
+        #expect(parsed.pieces[2].length > 0)
+    }
+}
