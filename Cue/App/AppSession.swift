@@ -660,11 +660,17 @@ final class AppSession {
         }
         let name = branchName(conversation)
         let id = conversation.identifier
+        let wasOnScreen = activeID == id
         conversation.deletedAt = .now
         save()
         forget(conversationID: id)
         reloadConversations()
-        select(parent.identifier)
+        // Closing the tab the reader is on lands them on its parent; closing another tab from the
+        // menu leaves them where they were.
+        if wasOnScreen || activeConversation == nil {
+            activeID = nil
+            select(parent.identifier)
+        }
         notify("Deleted branch “\(name)”", actionLabel: "Undo", autoDismiss: 6) { [weak self] in
             self?.restore(deletion)
         }

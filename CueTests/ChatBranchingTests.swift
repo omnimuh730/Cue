@@ -166,11 +166,22 @@ struct AppSessionBranchTests {
         // The branch forked from it survives, reattached where its parent was.
         #expect(second.forkedFromID == chat.identifier)
         #expect(session.branchTabs.map(\.identifier) == [chat.identifier, second.identifier])
-        #expect(session.activeID == chat.identifier)
+        // Closing a tab the reader is not on leaves them where they were.
+        #expect(session.activeID == second.identifier)
 
         session.performNoticeAction()
         #expect(session.conversations.contains { $0.identifier == first.identifier })
         #expect(second.forkedFromID == first.identifier)
+    }
+
+    @Test func closingTheTabOnScreenLandsOnItsParent() throws {
+        let session = try makeSession()
+        let chat = seed(session, title: "Roots", turns: [(.user, "q1"), (.assistant, "r1")])
+        let branch = try #require(session.fork(from: ordered(chat)[1].identifier))
+        #expect(session.activeID == branch.identifier)
+        session.deleteBranch(branch)
+        #expect(session.activeID == chat.identifier)
+        #expect(session.showsBranchTabs == false)
     }
 
     @Test func deletingTheChatTakesItsBranchesWithItAndUndoBringsThemBack() throws {

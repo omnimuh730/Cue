@@ -56,9 +56,13 @@ struct BranchTabBar: View {
         let streaming = session.isStreaming(branch)
         let unread = session.isUnread(branch)
         let isMain = branch.forkedFromID == nil
+        // While the name is being edited the tab's own taps stand down, or they would swallow
+        // the clicks that place the caret in the field.
+        let renaming = renamingID == branch.identifier
+        let taps: GestureMask = renaming ? .subviews : .all
 
         return HStack(spacing: 5) {
-            if renamingID == branch.identifier {
+            if renaming {
                 TextField("Branch name", text: $renameText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, weight: .medium))
@@ -104,8 +108,8 @@ struct BranchTabBar: View {
                 .fill(isActive ? Color.accentColor.opacity(0.22) : (isHovered ? Color.primary.opacity(0.06) : .clear))
         )
         .contentShape(RoundedRectangle(cornerRadius: CueTheme.radiusRow, style: .continuous))
-        .onTapGesture { session.select(branch.identifier) }
-        .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(branch) })
+        .gesture(TapGesture().onEnded { session.select(branch.identifier) }, including: taps)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(branch) }, including: taps)
         .contextMenu { menu(branch) }
         .onHover { hovering in
             hoveredID = hovering ? branch.identifier : (hoveredID == branch.identifier ? nil : hoveredID)
