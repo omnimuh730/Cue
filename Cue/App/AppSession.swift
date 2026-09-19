@@ -547,6 +547,33 @@ final class AppSession {
         return rows
     }
 
+    /// Branches of the chat on screen keyed by the turn each was cut at, so the transcript can
+    /// mark where the thread diverged without searching the family once per row it draws.
+    var forksByMessage: [UUID: [Conversation]] {
+        guard let active = activeConversation else { return [:] }
+        var map: [UUID: [Conversation]] = [:]
+        for branch in branchFamily(of: active) where branch.forkedFromID == active.identifier {
+            guard let messageID = branch.forkedAtMessageID else { continue }
+            map[messageID, default: []].append(branch)
+        }
+        return map
+    }
+
+    /// The turns a branch added after it was cut: what the fork trail shows as its thread.
+    func branchContinuation(of branch: Conversation) -> [Message] {
+        ChatBranching.continuation(
+            of: orderedMessages(in: branch),
+            forkedAt: branch.createdAt,
+            createdAt: \.createdAt
+        )
+    }
+
+    /// Opens a branch from the fork trail, landing on one of its turns.
+    func openBranch(_ branch: Conversation, at messageID: UUID? = nil) {
+        select(branch.identifier)
+        if let messageID { scrollTarget = messageID }
+    }
+
     /// Branches in a family, for the row's branch count.
     func branchCount(of conversation: Conversation) -> Int {
         branchFamily(of: conversation).count

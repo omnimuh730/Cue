@@ -67,6 +67,29 @@ struct ChatBranchingTests {
         #expect(quoted.count == ChatBranching.maxQuoteCharacters + 3) // "> " + text + "…"
     }
 
+    @Test func aBranchsThreadIsTheTurnsItAddedAfterTheFork() {
+        let forkedAt = Date()
+        struct Turn { var name: String; var at: Date }
+        let turns = [
+            // Inherited copies keep the time of the turns they came from.
+            Turn(name: "q1", at: forkedAt.addingTimeInterval(-90)),
+            Turn(name: "r1", at: forkedAt.addingTimeInterval(-60)),
+            Turn(name: "q2", at: forkedAt.addingTimeInterval(30)),
+            Turn(name: "r2", at: forkedAt.addingTimeInterval(45))
+        ]
+        let thread = ChatBranching.continuation(of: turns, forkedAt: forkedAt, createdAt: \.at)
+        #expect(thread.map(\.name) == ["q2", "r2"])
+        // A branch nobody has asked anything in yet has no thread of its own.
+        #expect(ChatBranching.continuation(of: Array(turns.prefix(2)), forkedAt: forkedAt, createdAt: \.at).isEmpty)
+    }
+
+    @Test func aPreviewReadsAsOneLineOfPlainText() {
+        #expect(ChatBranching.preview("## Hooks\n\nThey let you use `state` in a **function**.")
+            == "Hooks They let you use state in a function.")
+        #expect(ChatBranching.preview(String(repeating: "ab", count: 200), limit: 10) == "ababababab…")
+        #expect(ChatBranching.preview("   ") == "")
+    }
+
     @Test func aQuoteLandsUnderWhatWasAlreadyTyped() {
         #expect(ChatBranching.appendingQuote("hi", to: "") == "> hi\n\n")
         #expect(ChatBranching.appendingQuote("hi", to: " what about\n") == "what about\n\n> hi\n\n")
@@ -196,6 +219,34 @@ struct AppSessionBranchTests {
         session.performNoticeAction()
         #expect(session.conversations.contains { $0.identifier == chat.identifier })
         #expect(session.conversations.contains { $0.identifier == branch.identifier })
+    }
+
+    @Test func theTranscriptMarksWhereEachBranchWasCut() throws {
+        let session = try makeSession()
+        let chat = seed(session, title: "Roots", turns: [(.user, "q1"), (.assistant, "r1"), (.user, "q2")])
+        let cut = ordered(chat)[1]
+        let branch = try #require(session.fork(from: cut.identifier))
+
+        // Read from the chat it was cut out of, the branch is marked at that turn.
+        session.select(chat.identifier)
+        #expect(session.forksByMessage[cut.identifier]?.map(\.identifier) == [branch.identifier])
+        #expect(session.forksByMessage[ordered(chat)[0].identifier] == nil)
+        // Read from the branch itself, there is nothing to mark: it was not forked from itself.
+        session.select(branch.identifier)
+        #expect(session.forksByMessage.isEmpty)
+
+        // Its thread is what it went on to ask, not the history it inherited.
+        #expect(session.branchContinuation(of: branch).isEmpty)
+        let follow = Message(role: .user, content: "what about hooks?", createdAt: .now, status: .complete)
+        follow.conversation = branch
+        branch.messages.append(follow)
+        #expect(session.branchContinuation(of: branch).map(\.content) == ["what about hooks?"])
+
+        // Opening a branch from the trail lands on the turn that was clicked.
+        session.select(chat.identifier)
+        session.openBranch(branch, at: follow.identifier)
+        #expect(session.activeID == branch.identifier)
+        #expect(session.scrollTarget == follow.identifier)
     }
 
     @Test func selectedTextCanBeQuotedOrForkedFrom() throws {

@@ -74,6 +74,34 @@ nonisolated enum ChatBranching {
         return typed + "\n\n" + quoted + "\n\n"
     }
 
+    /// The turns a branch added after it was cut — its follow-up thread, without the history it
+    /// inherited. A fork copies the turns it starts from, and a copy keeps the time of the turn it
+    /// came from, so the fork's own creation time is the line between what it inherited and what
+    /// it went on to ask.
+    static func continuation<T>(of turns: [T], forkedAt: Date, createdAt: (T) -> Date) -> [T] {
+        turns.filter { createdAt($0) >= forkedAt }
+    }
+
+    /// One line of a turn for the fork trail: Markdown decoration dropped and whitespace
+    /// collapsed, so a heading, a bullet, and a paragraph all read as plain text at 12pt.
+    static func preview(_ text: String, limit: Int = 160) -> String {
+        var flattened = ""
+        var lastWasSpace = false
+        for character in text {
+            if character.isWhitespace || character.isNewline {
+                if !flattened.isEmpty, !lastWasSpace { flattened.append(" ") }
+                lastWasSpace = true
+                continue
+            }
+            if "#*_`>".contains(character) { continue }
+            flattened.append(character)
+            lastWasSpace = false
+        }
+        let trimmed = flattened.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count > limit else { return trimmed }
+        return String(trimmed.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
     private static func parentLinks<T, ID: Hashable>(in chats: [T], key: (T) -> ID, parent: (T) -> ID?) -> [ID: ID] {
         var links: [ID: ID] = [:]
         for chat in chats {

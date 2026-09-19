@@ -20,6 +20,8 @@ Hover a message for **Copy**, **Regenerate** (the menu picks another model), **E
 
 Cue treats a chat like a git branch. **Fork** on any message — the hover row under a bubble, the tab bar's **+**, or a chat's context menu — copies the thread up to that turn into a new branch and leaves the original exactly as it was, so both versions live on. The first fork makes a tab bar appear under the toolbar: `main` and the forks beside it. Click a tab to switch, double-click to rename it, **⌥⌘[** / **⌥⌘]** step through them, and the **×** on a fork deletes it (anything forked out of it reattaches to its parent, and **Undo** puts it back).
 
+Where a thread split, the turn it was cut at carries a **Forked here** line with a chip per branch. Click a chip and that branch's own follow-up turns open underneath as a thread — what it went on to ask, without the history it inherited — and clicking any of those turns opens the branch on it.
+
 The sidebar still shows one row per chat however many branches it has; the row carries a branch count and reopens on the branch you last read. Deleting the row deletes the thread with all of its branches.
 
 Select any text in a message and two actions float over it: **Add to chat** quotes the passage into the composer, and **Fork** branches the chat at that message and carries the quote into the new branch's composer — the way to ask a follow-up about one part of an answer without derailing the thread it came from.
