@@ -22,6 +22,13 @@ final class Conversation {
     var deletedAt: Date?
     /// True once the user renamed the chat, so the first message no longer titles it.
     var titleIsCustom: Bool?
+    /// Branching: the chat this one was forked from, nil for the `main` branch of a family.
+    var forkedFromID: UUID?
+    /// The message in the parent the fork was cut at; the branch carries a copy of it and
+    /// everything before it.
+    var forkedAtMessageID: UUID?
+    /// Tab label; nil means the default name for the branch's place in its family.
+    var branchName: String?
     @Relationship(deleteRule: .cascade, inverse: \Message.conversation)
     var messages: [Message]
 

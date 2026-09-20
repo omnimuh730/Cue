@@ -59,6 +59,44 @@ struct MarkdownBlockSplitTests {
         ])
     }
 
+    @Test func aSentenceThatOnlyStartsWithBackticksStaysProse() {
+        // A fence opened here would never close, swallowing the rest of the answer into a code
+        // block whose "language" is the rest of the sentence.
+        let blocks = MarkdownBlocks.split("""
+        Fibonacci in short:
+
+        ```text``` marks plain output, so here it is:
+
+        0, 1, 1, 2, 3, 5, 8
+
+        Each number is the sum of the two before it.
+        """)
+        #expect(blocks == [
+            .paragraph("Fibonacci in short:"),
+            .paragraph("```text``` marks plain output, so here it is:"),
+            .paragraph("0, 1, 1, 2, 3, 5, 8"),
+            .paragraph("Each number is the sum of the two before it.")
+        ])
+    }
+
+    @Test func realFencesStillOpen() {
+        #expect(MarkdownBlocks.fenceInfo("```swift") == "swift")
+        #expect(MarkdownBlocks.fenceInfo("```  Text ") == "text")
+        // No language at all is still a fence.
+        #expect(MarkdownBlocks.fenceInfo("```") == "")
+        #expect(MarkdownBlocks.fenceInfo("``text``") == nil)
+        #expect(MarkdownBlocks.fenceInfo("nope ```swift") == nil)
+    }
+
+    @Test func proseAfterAClosedFenceSurvives() {
+        let blocks = MarkdownBlocks.split("Intro:\n\n```text\n0, 1, 1, 2\n```\n\nEach is the sum of two.")
+        #expect(blocks == [
+            .paragraph("Intro:"),
+            .code(language: "text", "0, 1, 1, 2"),
+            .paragraph("Each is the sum of two.")
+        ])
+    }
+
     @Test func quotesJoinLinesAndEndAtProse() {
         let blocks = MarkdownBlocks.split("> A quote\n> continues\n>\n> second para\nBack to prose")
         #expect(blocks == [
