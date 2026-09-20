@@ -11,6 +11,7 @@ struct ChatView: View {
     @State private var followBox = ChatScrollFollowBox()
     /// Older turns beyond `historyWindow` stay out of the layout until asked for.
     @State private var historyExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let topAnchor = "chat-top"
     private static let bottomAnchor = "chat-bottom"
@@ -101,6 +102,11 @@ struct ChatView: View {
                             }
                         }
                         .id(message.identifier)
+                        // A new turn settles in from the edge it arrives at; a removed one just fades.
+                        .transition(.asymmetric(
+                            insertion: .move(edge: readingOrder == .newestAtBottom ? .bottom : .top).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                     }
                     if hidden > 0, readingOrder == .newestAtTop {
                         earlierMessagesButton(hidden)
@@ -114,6 +120,8 @@ struct ChatView: View {
                 .padding(.horizontal, CueTheme.Spacing.lg)
                 .padding(.top, CueTheme.Spacing.md)
                 .padding(.bottom, CueTheme.Spacing.lg)
+                // Only a turn arriving or leaving animates; streaming growth and resizes stay direct.
+                .animation(reduceMotion ? nil : CueMotion.arrive, value: all.count)
             }
             .defaultScrollAnchor(readingOrder == .newestAtBottom ? .bottom : .top, for: .initialOffset)
             .onScrollGeometryChange(for: ChatScrollSnapshot.self) { geometry in
@@ -175,8 +183,9 @@ struct ChatView: View {
                 .frame(height: 28)
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CuePressButtonStyle())
         .cueGlass(cornerRadius: 14, interactive: true)
+        .cueHoverLift(1.04)
         .frame(maxWidth: .infinity)
     }
 
@@ -272,11 +281,13 @@ struct MessageBubble: View {
                 } else {
                     if status == .streaming, message.content.isEmpty {
                         HStack(spacing: 8) {
-                            CueMarkSpin(pointSize: 16, spinning: true, style: .busy)
+                            CueOrb(size: 18, energy: 1)
                             Text(activity ?? "Thinking…")
                                 .font(.system(size: 14))
                                 .foregroundStyle(.secondary)
                                 .contentTransition(.opacity)
+                                // A light sweep says "working" without a second spinner.
+                                .cueShimmer(active: true, period: 1.9, strength: 0.55)
                         }
                         .padding(.vertical, 4)
                         .animation(.easeInOut(duration: 0.18), value: activity)
@@ -297,8 +308,9 @@ struct MessageBubble: View {
                                     .frame(height: 26)
                                     .contentShape(Capsule())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(CuePressButtonStyle())
                             .cueGlass(cornerRadius: 13, interactive: true)
+                            .cueHoverLift(1.04)
                             .help("Send the question again")
                         }
                     } else {
@@ -315,7 +327,7 @@ struct MessageBubble: View {
                             .padding(.top, 2)
                     }
                     if status == .streaming, !message.content.isEmpty {
-                        CueMarkSpin(pointSize: 13, spinning: true, style: .busy)
+                        CueOrb(size: 14, energy: 1)
                     }
                     if status != .streaming {
                         HStack(spacing: 10) {
@@ -369,7 +381,8 @@ struct MessageBubble: View {
                 .help(message.createdAt.formatted(date: .abbreviated, time: .standard))
         }
         .opacity(hovering || copied ? 1 : 0)
-        .animation(.easeInOut(duration: 0.15), value: hovering || copied)
+        .offset(y: hovering || copied ? 0 : 3)
+        .animation(CueMotion.control, value: hovering || copied)
     }
 
     private var regenerateMenu: some View {

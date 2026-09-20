@@ -16,7 +16,8 @@ struct ChatToolbar: View {
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(CuePressButtonStyle())
+            .cueHoverLift()
             .help(session.sidebarOpen ? "Hide sidebar" : "Show sidebar")
             .padding(.leading, CueTheme.trafficClearance)
             Spacer(minLength: 0)

@@ -3,6 +3,9 @@ import SwiftUI
 struct RootView: View {
     @Bindable var session: AppSession
     @State private var dropTargeted = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var panelMotion: Animation? { reduceMotion ? nil : CueMotion.panel }
 
     var body: some View {
         ZStack {
@@ -14,6 +17,7 @@ struct RootView: View {
                 HStack(spacing: 0) {
                     if session.sidebarOpen, !overlaid {
                         sidebar
+                            .transition(.move(edge: .leading).combined(with: .opacity))
                     }
                     VStack(spacing: 0) {
                         ChatView(session: session)
@@ -39,6 +43,8 @@ struct RootView: View {
                         floatingSidebar(width: geo.size.width)
                     }
                 }
+                // The sidebar slides and the reading column follows it on one spring.
+                .animation(panelMotion, value: session.sidebarOpen)
                 .onChange(of: overlaid, initial: true) { _, isOverlaid in
                     session.setSidebarOverlaid(isOverlaid)
                 }
@@ -51,8 +57,10 @@ struct RootView: View {
             .overlay {
                 if dropTargeted {
                     DropTargetOverlay()
+                        .transition(.opacity)
                 }
             }
+            .animation(CueMotion.fade, value: dropTargeted)
             .ignoresSafeArea(edges: .top)
             .overlay(alignment: .top) {
                 ChatToolbar(session: session)
@@ -60,9 +68,11 @@ struct RootView: View {
             }
             if session.settingsOpen {
                 SettingsView(session: session)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
             if session.searchOpen {
                 SearchView(session: session)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
             if let preview = session.previewAttachment {
                 AttachmentPreviewOverlay(attachment: preview) {
@@ -86,6 +96,7 @@ struct RootView: View {
                 ThreadInfoView(conversation: conversation, project: session.project(for: conversation)) {
                     session.infoConversationID = nil
                 }
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
             if let settingsID = session.projectSettingsID,
                let project = session.projects.first(where: { $0.identifier == settingsID }) {
@@ -112,6 +123,11 @@ struct RootView: View {
                 )
             }
         }
+        // Every sheet-like surface fades and settles in on the same spring.
+        .animation(panelMotion, value: session.settingsOpen)
+        .animation(panelMotion, value: session.searchOpen)
+        .animation(panelMotion, value: session.infoConversationID)
+        .animation(panelMotion, value: session.notice?.text)
         .overlay {
             // Cursor coordinates are panel content space; the overlay must span the full window,
             // including the transparent title bar the ZStack above is inset from.
@@ -171,6 +187,7 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 420, minHeight: 420)
+        .environment(\.cueMotionActive, session.windowVisible && !reduceMotion)
     }
 
     private var sidebar: some View {
@@ -189,6 +206,7 @@ struct RootView: View {
             Color.black.opacity(0.28)
                 .ignoresSafeArea()
                 .onTapGesture { session.sidebarOpen = false }
+                .transition(.opacity)
             SidebarView(session: session)
                 .frame(width: min(CueTheme.sidebarWidth, max(200, width - CueTheme.sidebarOverlayGutter)))
                 .cueGlass(cornerRadius: 18, interactive: true)
@@ -196,6 +214,7 @@ struct RootView: View {
                 .padding(.top, CueTheme.headerHeight + CueTheme.sidebarInset)
                 .padding(.bottom, CueTheme.sidebarInset)
                 .shadow(color: .black.opacity(0.3), radius: 24, x: 6)
+                .transition(.move(edge: .leading).combined(with: .opacity))
         }
     }
 }

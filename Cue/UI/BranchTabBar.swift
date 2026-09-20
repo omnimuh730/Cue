@@ -35,7 +35,7 @@ struct BranchTabBar: View {
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(CuePressButtonStyle())
             .help("Fork this branch at its newest turn")
             .accessibilityLabel("New branch")
         }
@@ -79,7 +79,7 @@ struct BranchTabBar: View {
                     .lineLimit(1)
             }
             if streaming {
-                CueMarkSpin(pointSize: 11, spinning: true, style: .busy)
+                CueOrb(size: 12, energy: 1)
             } else if unread {
                 Circle()
                     .fill(Color.accentColor)
@@ -96,7 +96,7 @@ struct BranchTabBar: View {
                         .frame(width: 14, height: 14)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(CuePressButtonStyle())
                 .help("Delete this branch")
                 .accessibilityLabel("Delete branch")
             }
@@ -107,6 +107,7 @@ struct BranchTabBar: View {
             RoundedRectangle(cornerRadius: CueTheme.radiusRow, style: .continuous)
                 .fill(isActive ? Color.accentColor.opacity(0.22) : (isHovered ? Color.primary.opacity(0.06) : .clear))
         )
+        .animation(CueMotion.fade, value: isHovered)
         .contentShape(RoundedRectangle(cornerRadius: CueTheme.radiusRow, style: .continuous))
         .gesture(TapGesture().onEnded { session.select(branch.identifier) }, including: taps)
         .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(branch) }, including: taps)

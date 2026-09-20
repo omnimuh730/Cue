@@ -7,6 +7,7 @@ struct ComposerView: View {
     @State private var skillPickerDismissed = false
     @State private var toolIndex = 0
     @State private var toolPickerDismissed = false
+    @State private var sendHovering = false
 
     /// Text after a `/` the user is typing, anywhere in the draft, while the skill name is still open.
     private var skillQuery: String? {
@@ -38,7 +39,7 @@ struct ComposerView: View {
                     onPick: { pickSkill($0) },
                     onHover: { skillIndex = $0 }
                 )
-                .transition(.opacity)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let query = toolQuery {
                 ToolPickerPanel(
                     tools: toolMatches,
@@ -47,7 +48,7 @@ struct ComposerView: View {
                     onPick: { pickTool($0) },
                     onHover: { toolIndex = $0 }
                 )
-                .transition(.opacity)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if showsTranscript {
                 TranscriptStrip(
@@ -62,7 +63,7 @@ struct ComposerView: View {
             }
             composer
         }
-        .animation(.easeInOut(duration: 0.15), value: showsTranscript)
+        .animation(CueMotion.panel, value: showsTranscript)
         .frame(maxWidth: CueTheme.readingColumnMax)
         .frame(maxWidth: .infinity)
             .onChange(of: session.draft) { previous, next in
@@ -89,7 +90,7 @@ struct ComposerView: View {
                     toolIndex = 0
                 }
             }
-            .animation(.easeInOut(duration: 0.12), value: skillQuery == nil && toolQuery == nil)
+            .animation(CueMotion.panel, value: skillQuery == nil && toolQuery == nil)
     }
 
     private func pickTool(_ tool: ComposerTool) {
@@ -202,29 +203,50 @@ struct ComposerView: View {
                 }
                 Spacer()
                 ModelPicker(session: session)
-                Button {
-                    session.send()
-                } label: {
-                    Image(systemName: session.composerPrimaryAction == .stop ? "stop.fill" : "arrow.up")
-                        .font(.system(size: 13, weight: .bold))
-                        .frame(width: 34, height: 34)
-                        .background(session.composerPrimaryAction == .stop ? Color.red.opacity(0.85) : Color.accentColor, in: Circle())
-                        // Plain buttons hit-test only the glyph; make the whole disc clickable.
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white)
-                .help(session.composerPrimaryAction == .stop ? "Stop this response" : "Send")
-                .animation(.easeInOut(duration: 0.15), value: session.composerPrimaryAction)
+                sendButton
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 10)
-        .cueGlass(cornerRadius: CueTheme.radiusComposer, interactive: true)
+        .cueGlass(cornerRadius: CueTheme.radiusComposer, interactive: true, sheen: true)
+        // While the reply streams, the composer's edge carries the same light as the orb.
+        .cueAuroraGlow(active: session.isStreaming, cornerRadius: CueTheme.radiusComposer)
         .shadow(color: .black.opacity(0.18), radius: 24, y: 8)
         .frame(maxWidth: CueTheme.readingColumnMax)
         .frame(maxWidth: .infinity)
+    }
+
+    /// The one primary action. A flat disc — accent to send, red to stop — that dips on press,
+    /// lifts and glows under the pointer, and throws a short sparkle when a draft becomes
+    /// sendable and again as it goes.
+    private var sendButton: some View {
+        let stop = session.composerPrimaryAction == .stop
+        let tint = stop ? Color.red : Color.accentColor
+        return Button {
+            session.send()
+        } label: {
+            Image(systemName: stop ? "stop.fill" : "arrow.up")
+                .font(.system(size: 13, weight: .bold))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 34, height: 34)
+                .background {
+                    // A flat disc; the pointer is answered with a tinted glow, not a gradient.
+                    Circle()
+                        .fill(tint.opacity(stop ? 0.85 : 1))
+                        .shadow(color: tint.opacity(sendHovering ? 0.5 : 0.18), radius: sendHovering ? 12 : 4, y: 2)
+                }
+                .cueSparkleBurst(on: session.hasComposerPayload, strength: 1.1)
+                // Plain buttons hit-test only the glyph; make the whole disc clickable.
+                .contentShape(Circle())
+        }
+        .buttonStyle(CuePressButtonStyle())
+        .foregroundStyle(.white)
+        .cueHoverLift(1.08)
+        .onHover { sendHovering = $0 }
+        .help(stop ? "Stop this response" : "Send")
+        .animation(CueMotion.control, value: session.composerPrimaryAction)
+        .animation(CueMotion.control, value: sendHovering)
     }
 
     private var placeholder: String {
@@ -241,7 +263,7 @@ struct ComposerView: View {
 
     private var backgroundPill: some View {
         HStack(spacing: 5) {
-            CueMarkSpin(pointSize: 14, spinning: true, style: .busy)
+            CueOrb(size: 14, energy: 1)
                 .frame(width: 18)
             Text(backgroundStreams == 1 ? "1 chat responding" : "\(backgroundStreams) chats responding")
                 .font(.caption)

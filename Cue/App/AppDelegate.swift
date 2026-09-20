@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.reveal(passive: session.settings.passiveFocusMode)
         self.session = session
         self.panel = panel
+        CueShaderWarmup.run()
 
         NotificationCenter.default.addObserver(forName: .cueToggleWindow, object: nil, queue: .main) { _ in
             Task { @MainActor in

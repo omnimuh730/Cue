@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Centered empty-chat hero: the Cue mark wakes up, then the reading column stays quiet.
+/// Centered empty-chat hero: the word arrives in star particles, then the reading column stays quiet.
 struct EmptyChatView: View {
     var project: Project?
     var onProjectSettings: () -> Void
@@ -12,19 +12,14 @@ struct EmptyChatView: View {
 
     var body: some View {
         VStack(spacing: CueTheme.Spacing.md) {
-            CueMarkSpin(pointSize: 80, spinning: appeared && !reduceMotion, style: .flick)
+            // The hero is the word itself, written in star particles that fly in, drift, and
+            // scatter from the pointer. It is also the title, so nothing repeats it below.
+            ParticleWordView(word: "CUE")
+                .frame(maxWidth: .infinity)
+                .frame(height: 300)
                 .opacity(appeared ? 1 : 0)
-                .padding(.bottom, CueTheme.Spacing.xs)
-
-            OrbitingLine(
-                text: "Cue",
-                font: .system(size: 27, weight: .medium),
-                color: .primary,
-                active: appeared,
-                stagger: 0.11,
-                duration: 0.78
-            )
-            .accessibilityLabel("Cue")
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: appeared)
+                .padding(.bottom, -CueTheme.Spacing.lg)
 
             subtitle
             actions
@@ -115,8 +110,9 @@ struct EmptyChatView: View {
                         .frame(height: 32)
                         .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(CuePressButtonStyle())
                 .cueGlass(cornerRadius: 16, interactive: true)
+                .cueHoverLift(1.04)
             } else {
                 HStack(spacing: 8) {
                     Button(action: onNewProject) {
@@ -126,8 +122,9 @@ struct EmptyChatView: View {
                             .frame(height: 32)
                             .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(CuePressButtonStyle())
                     .cueGlass(cornerRadius: 16, interactive: true)
+                    .cueHoverLift(1.04)
                     .help("Group chats with shared instructions and knowledge files")
                     Button(action: onOpenCodeFolder) {
                         Label("Open code folder", systemImage: "chevron.left.forwardslash.chevron.right")
@@ -136,8 +133,9 @@ struct EmptyChatView: View {
                             .frame(height: 32)
                             .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(CuePressButtonStyle())
                     .cueGlass(cornerRadius: 16, interactive: true)
+                    .cueHoverLift(1.04)
                     .help("Chat about a local codebase through the Codex CLI")
                 }
             }

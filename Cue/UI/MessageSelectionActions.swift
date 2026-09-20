@@ -54,6 +54,7 @@ struct SelectionActionsOverlay: View {
             // Placed from its measured size; hidden for the frame before that lands rather than
             // flashing in the wrong spot.
             .opacity(size == .zero ? 0 : 1)
+            .animation(CueMotion.fade, value: size == .zero)
             .position(position(in: geo.size))
         }
         .ignoresSafeArea()
@@ -82,7 +83,7 @@ struct SelectionActionsOverlay: View {
                 .frame(height: 24)
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CuePressButtonStyle())
         .help(help)
     }
 }

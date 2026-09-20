@@ -18,6 +18,13 @@ final class CuePanelController: NSObject, NSWindowDelegate {
     private let hostingView: NSHostingView<RootView>
     var isQuitting = false
     var onClose: (() -> Void)?
+    /// Fires with whether the panel is actually on screen: ordered in and not fully covered.
+    /// Continuous effects stop while it is not, so a hidden Cue costs nothing.
+    var onVisibilityChange: ((Bool) -> Void)?
+
+    var isOnScreen: Bool {
+        panel.isVisible && panel.occlusionState.contains(.visible)
+    }
 
     init(rootView: RootView) {
         let hosting = NSHostingView(rootView: rootView)
@@ -90,10 +97,16 @@ final class CuePanelController: NSObject, NSWindowDelegate {
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
+        onVisibilityChange?(isOnScreen)
     }
 
     func hide() {
         panel.orderOut(nil)
+        onVisibilityChange?(false)
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        onVisibilityChange?(isOnScreen)
     }
 
     func toggle(passive: Bool) {

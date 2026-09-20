@@ -20,7 +20,7 @@ struct ForkTrailView: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.15), value: expandedID)
+        .animation(CueMotion.panel, value: expandedID)
     }
 
     private var chips: some View {
@@ -65,7 +65,7 @@ struct ForkTrailView: View {
             )
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CuePressButtonStyle())
         .help(session.branchOrigin(of: branch) ?? "Open this branch's thread")
         .accessibilityLabel("Branch \(session.branchName(branch)), \(turns) \(turns == 1 ? "turn" : "turns")")
     }
@@ -99,7 +99,7 @@ struct ForkTrailView: View {
                         .padding(.vertical, 3)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(CuePressButtonStyle())
             }
         }
         .padding(.leading, 2)
@@ -126,7 +126,7 @@ struct ForkTrailView: View {
             .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CuePressButtonStyle())
         .help("Open \(session.branchName(branch)) at this turn")
     }
 }
