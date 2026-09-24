@@ -23,6 +23,18 @@ nonisolated enum Pricing {
     static let webSearchCostPerCallUsd = 0.01
 
     static let modelPricing: [ModelID: ModelPricing] = [
+        .astra: ModelPricing(
+            standard: TokenRates(inputPerMillion: 10, cachedInputPerMillion: 1, cacheWritePerMillion: 12.5, outputPerMillion: 50),
+            longContext: TokenRates(inputPerMillion: 20, cachedInputPerMillion: 2, cacheWritePerMillion: 25, outputPerMillion: 75)
+        ),
+        .gpt6Sol: ModelPricing(
+            standard: TokenRates(inputPerMillion: 2, cachedInputPerMillion: 0.2, cacheWritePerMillion: 2.5, outputPerMillion: 10),
+            longContext: TokenRates(inputPerMillion: 4, cachedInputPerMillion: 0.4, cacheWritePerMillion: 5, outputPerMillion: 15)
+        ),
+        .gpt6Luna: ModelPricing(
+            standard: TokenRates(inputPerMillion: 0.1, cachedInputPerMillion: 0.01, cacheWritePerMillion: 0.125, outputPerMillion: 0.5),
+            longContext: TokenRates(inputPerMillion: 0.2, cachedInputPerMillion: 0.02, cacheWritePerMillion: 0.25, outputPerMillion: 0.75)
+        ),
         .sol: ModelPricing(
             standard: TokenRates(inputPerMillion: 5, cachedInputPerMillion: 0.5, cacheWritePerMillion: 6.25, outputPerMillion: 30),
             longContext: TokenRates(inputPerMillion: 10, cachedInputPerMillion: 1, cacheWritePerMillion: 12.5, outputPerMillion: 45)
@@ -34,10 +46,6 @@ nonisolated enum Pricing {
         .luna: ModelPricing(
             standard: TokenRates(inputPerMillion: 0.2, cachedInputPerMillion: 0.02, cacheWritePerMillion: 0.25, outputPerMillion: 1.2),
             longContext: TokenRates(inputPerMillion: 0.4, cachedInputPerMillion: 0.04, cacheWritePerMillion: 0.5, outputPerMillion: 1.8)
-        ),
-        .mini: ModelPricing(
-            standard: TokenRates(inputPerMillion: 0.75, cachedInputPerMillion: 0.075, cacheWritePerMillion: 0, outputPerMillion: 4.5),
-            longContext: nil
         )
     ]
 

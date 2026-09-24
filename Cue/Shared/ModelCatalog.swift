@@ -1,12 +1,31 @@
 import Foundation
 
-nonisolated enum ModelID: String, Codable, CaseIterable, Sendable, Identifiable {
+nonisolated enum ModelID: String, CaseIterable, Sendable, Identifiable {
+    case astra = "gpt-6-astra"
+    case gpt6Sol = "gpt-6-sol"
+    case gpt6Luna = "gpt-6-luna"
     case sol = "gpt-5.6-sol"
     case terra = "gpt-5.6-terra"
     case luna = "gpt-5.6-luna"
-    case mini = "gpt-5.4-mini"
 
     var id: String { rawValue }
+}
+
+extension ModelID: Codable {
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "gpt-5.4-mini":
+            self = .gpt6Luna
+        default:
+            self = ModelID(rawValue: raw) ?? .sol
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 nonisolated enum ReasoningEffort: String, Codable, CaseIterable, Sendable, Identifiable {
@@ -46,17 +65,42 @@ nonisolated enum ModelCatalog {
         .init(id: .max, label: "Max", shortLabel: "Max", description: "Most reasoning for the hardest tasks")
     ]
 
-    private static let gpt56: [ReasoningEffort] = [.none, .low, .medium, .high, .xhigh, .max]
-    private static let gpt54Mini: [ReasoningEffort] = [.none, .low, .medium, .high, .xhigh]
+    private static let fullEffort: [ReasoningEffort] = [.none, .low, .medium, .high, .xhigh, .max]
+    /// Astra rejects `reasoning.effort: none` with HTTP 400.
+    private static let astraEffort: [ReasoningEffort] = [.low, .medium, .high, .xhigh, .max]
 
     static let models: [ModelDefinition] = [
+        .init(
+            id: .astra,
+            label: "GPT-6 Astra",
+            shortLabel: "6 Astra",
+            description: "Most capable model for the hardest end-to-end work",
+            group: "GPT-6",
+            supportedEfforts: astraEffort
+        ),
+        .init(
+            id: .gpt6Sol,
+            label: "GPT-6 Sol",
+            shortLabel: "6 Sol",
+            description: "Complex coding and agentic workflows",
+            group: "GPT-6",
+            supportedEfforts: fullEffort
+        ),
+        .init(
+            id: .gpt6Luna,
+            label: "GPT-6 Luna",
+            shortLabel: "6 Luna",
+            description: "Efficient for focused, high-volume tasks",
+            group: "GPT-6",
+            supportedEfforts: fullEffort
+        ),
         .init(
             id: .sol,
             label: "GPT-5.6 Sol",
             shortLabel: "5.6 Sol",
             description: "Frontier capability for complex work",
             group: "GPT-5.6",
-            supportedEfforts: gpt56
+            supportedEfforts: fullEffort
         ),
         .init(
             id: .terra,
@@ -64,7 +108,7 @@ nonisolated enum ModelCatalog {
             shortLabel: "5.6 Terra",
             description: "Balanced intelligence and cost",
             group: "GPT-5.6",
-            supportedEfforts: gpt56
+            supportedEfforts: fullEffort
         ),
         .init(
             id: .luna,
@@ -72,15 +116,7 @@ nonisolated enum ModelCatalog {
             shortLabel: "5.6 Luna",
             description: "Efficient for fast, high-volume work",
             group: "GPT-5.6",
-            supportedEfforts: gpt56
-        ),
-        .init(
-            id: .mini,
-            label: "GPT-5.4 mini",
-            shortLabel: "5.4 mini",
-            description: "Fast mini model for everyday tasks",
-            group: "GPT-5.4",
-            supportedEfforts: gpt54Mini
+            supportedEfforts: fullEffort
         )
     ]
 

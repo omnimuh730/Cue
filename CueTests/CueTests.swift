@@ -34,16 +34,22 @@ struct CueTests {
         #expect(continuation.messages.count == 2)
     }
 
-    @Test func effortNormalizesMaxForMini() {
-        #expect(ModelCatalog.normalizeEffort(.max, for: .mini) == .xhigh)
+    @Test func effortNormalizesNoneForAstra() {
+        #expect(ModelCatalog.normalizeEffort(.none, for: .astra) == .low)
         #expect(ModelCatalog.normalizeEffort(.low, for: .sol) == .low)
+        #expect(ModelCatalog.normalizeEffort(.none, for: .gpt6Luna) == .none)
+    }
+
+    @Test func retiredMiniDecodesAsGPT6Luna() throws {
+        let decoded = try JSONDecoder().decode(ModelID.self, from: Data(#""gpt-5.4-mini""#.utf8))
+        #expect(decoded == .gpt6Luna)
     }
 
     @Test func catalogGroupsPreserveOrder() {
         let groups = ModelCatalog.groupedModels
-        #expect(groups.map(\.group) == ["GPT-5.6", "GPT-5.4"])
-        #expect(groups[0].models.map(\.id) == [.sol, .terra, .luna])
-        #expect(groups[1].models.map(\.id) == [.mini])
+        #expect(groups.map(\.group) == ["GPT-6", "GPT-5.6"])
+        #expect(groups[0].models.map(\.id) == [.astra, .gpt6Sol, .gpt6Luna])
+        #expect(groups[1].models.map(\.id) == [.sol, .terra, .luna])
     }
 
     @Test func hotkeyFormatUsesMacKeycaps() {
@@ -69,10 +75,10 @@ struct CueTests {
         #expect(HotkeyCatalog.conflict(for: .cycleEffort, in: HotkeyCatalog.defaults) == nil)
     }
 
-    @Test func pricingUsesMiniRates() {
+    @Test func pricingUsesGPT6LunaRates() {
         let usage = TokenUsage(inputTokens: 1_000_000, outputTokens: 1_000_000, cachedInputTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0)
-        let estimate = Pricing.estimateTurnCost(model: .mini, usage: usage, webSearchCalls: 1)
-        #expect(estimate.costUsd == 0.75 + 4.5 + 0.01)
+        let estimate = Pricing.estimateTurnCost(model: .gpt6Luna, usage: usage, webSearchCalls: 1)
+        #expect(abs(estimate.costUsd - (0.1 + 0.5 + 0.01)) < 1e-9)
         #expect(Pricing.formatUsd(0) == "$0.00")
     }
 

@@ -45,7 +45,7 @@ struct ProjectModeTests {
     }
 
     @Test func codexMapperReportsUsageOnceAndFailures() throws {
-        let mapper = CodexEventMapper(model: .mini, effort: .medium)
+        let mapper = CodexEventMapper(model: .gpt6Luna, effort: .medium)
         let usage: [String: Any] = [
             "type": "turn.completed",
             "usage": ["input_tokens": 120, "output_tokens": 40, "cached_input_tokens": 20, "cache_write_input_tokens": 0, "reasoning_output_tokens": 8]
@@ -55,7 +55,7 @@ struct ProjectModeTests {
         if case .usage(let tokens, _, let model, let effort, let calls, _) = first[0] {
             #expect(tokens.inputTokens == 120)
             #expect(tokens.reasoningTokens == 8)
-            #expect(model == .mini)
+            #expect(model == .gpt6Luna)
             #expect(effort == .medium)
             #expect(calls == 0)
         } else {
