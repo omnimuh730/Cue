@@ -172,8 +172,8 @@ private struct ModelPickerPanel: View {
             .foregroundStyle(.tertiary)
             .padding(.top, 4)
 
-            if selectedModel == .mini {
-                Text("GPT-5.4 mini supports up to Extra High.")
+            if selectedModel == .astra {
+                Text("GPT-6 Astra always reasons. Off is not available.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
                     .padding(.top, 8)

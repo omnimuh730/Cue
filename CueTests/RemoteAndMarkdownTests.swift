@@ -208,7 +208,7 @@ struct RenderingAndSummaryTests {
             ChatTurn(id: UUID(), role: .user, content: "q2", createdAt: .now, status: .complete, attachments: []),
             ChatTurn(id: UUID(), role: .assistant, content: "a2", createdAt: .now, status: .complete, attachments: [],
                      usage: usage, costUsd: 0.02, webSearchCalls: 0,
-                     timing: ResponseTiming(timeToFirstTokenMs: 600, totalMs: 3000), model: .mini, reasoningEffort: .none)
+                     timing: ResponseTiming(timeToFirstTokenMs: 600, totalMs: 3000), model: .gpt6Luna, reasoningEffort: .none)
         ]
         let summary = ThreadSummary.build(from: turns)
         #expect(summary.userMessages == 2)
@@ -219,7 +219,7 @@ struct RenderingAndSummaryTests {
         #expect(summary.cacheHitRatio == 0.6)
         #expect(summary.reasoningTokens == 100)
         #expect(summary.webSearchCalls == 1)
-        #expect(summary.models == [.sol, .mini])
+        #expect(summary.models == [.sol, .gpt6Luna])
         #expect(summary.averageFirstTokenMs == 500)
         #expect(summary.averageTotalMs == 2500)
         #expect(summary.turns.map(\.index) == [1, 2])
